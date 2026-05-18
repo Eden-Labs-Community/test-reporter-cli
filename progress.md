@@ -5,9 +5,12 @@
 
 ## Status atual
 
-**M1 implementado e verde.** `test-reporter check` funcional: contrato de saída
-(texto + `--json`), config (zod), exit codes 0/1/>1, **29 testes** passando
-(unit + e2e), build limpo. Próximo: **M2** (TUI `run`).
+**M1 implementado e verde + runner plugável.** `test-reporter check` funcional:
+contrato (texto + `--json`), config (zod), exit codes 0/1/>1, build limpo.
+Runner agora é **abstração por adapter + factory** (`config.runner`): adapters
+**Vitest e Jest**, contrato byte-idêntico (módulo duração) entre os dois.
+**36 testes** passando (unit + e2e, incl. paridade Vitest↔Jest).
+Próximo: **M2** (TUI `run`).
 
 ## Milestones
 
@@ -33,6 +36,14 @@
   - Fixtures: pass / fail / mixed / config-invalid / runner-error.
   - 29 testes verdes (config, normalize, summary-text, json-exit, e2e via
     processo filho).
+- [x] **Runner plugável** (revisão da decisão #1 do PRD → #17):
+  - `src/core/runner/`: `adapter` (classe abstrata `TestRunnerAdapter` +
+    `RunnerError`), `factory` (`createRunner` por `config.runner`),
+    `vitest` (refactor do antigo `runVitest`), `jest` (`@jest/core` *lazy*).
+  - `src/core/run` virou facade (`runTests`); `config.runner` (zod, default
+    vitest); `check` inalterado (só compõe via factory).
+  - Fixtures `jest-pass`/`jest-mixed` + `runner-factory.test.ts` + e2e de
+    **paridade**: **36 testes verdes**, lint limpo.
 
 ## Próximo — M2 (ver SUCCESS_CRITERIA.md › M2)
 
@@ -50,7 +61,12 @@ Status: **Globais + M1 marcados ✓**; M2–M4 pendentes.
 
 ## Pendências conhecidas / dívidas
 
-- Sem commit git ainda; `master` só materializa após o 1º commit.
+- Sem commit git ainda; `master` só materializa após o 1º commit. *(o ambiente
+  atual reporta "não é repo git" — confirmar `git init` antes do 1º commit.)*
+- **Jest = peer dependency opcional** (`peerDependenciesMeta.jest.optional`);
+  está em devDependencies só p/ os fixtures/e2e. `@jest/core` é import *lazy*:
+  `runner:"jest"` sem Jest instalado → `RunnerError` (exit > 1, sem falso PASS)
+  — mesmo caminho dos demais erros de runner, coberto por design.
 - `npm audit`: 5 vulnerabilidades *moderate* transitivas (cadeia esbuild/vite
   via vitest) — sem fix não-breaking; reavaliar no M4.
 - `line/col` da falha = **local da definição do teste** (`includeTaskLocation`),
@@ -72,3 +88,10 @@ Status: **Globais + M1 marcados ✓**; M2–M4 pendentes.
   `startVitest`+reporter silencioso, `check`+CLI, 5 fixtures, 29 testes verdes.
   Gap corrigido: `summary.detail` (list/cause) agora aplicado. Docs +
   SUCCESS_CRITERIA atualizados (Globais + M1 ✓).
+- **2026-05-18 (runner plugável):** revisada a decisão #1 do PRD (→ #17).
+  TDD-lite red→green: `config.runner` (zod); `TestRunnerAdapter` (classe
+  abstrata) + `createRunner` factory; `VitestAdapter` (extração do `runVitest`,
+  refactor puro) + `JestAdapter` (`@jest/core` `runCLI`, *lazy*, peer opcional);
+  `core/run` vira facade `runTests`. Fixtures `jest-pass/jest-mixed`, teste de
+  factory e e2e de paridade Vitest↔Jest. **36 testes verdes**, lint limpo.
+  PRD v0.8 / CLAUDE / SUCCESS_CRITERIA / memória atualizados.

@@ -92,3 +92,37 @@ describe("check (e2e)", () => {
     expect(a).toBe(b);
   }, T);
 });
+
+// Same contract, different runner: proves the adapter abstraction keeps
+// `check`'s output runner-agnostic (config picks vitest vs jest).
+describe("check (e2e) — jest adapter", () => {
+  it("jest pass fixture → explicit PASS, exit 0, clean stderr", () => {
+    const r = check("jest-pass");
+    expect(stripDur(r.stdout)).toBe(
+      "✓ PASS · 2 passed · 0 failed · 0 skipped · <dur>s\n",
+    );
+    expect(r.code).toBe(0);
+    expect(r.stderr).toBe("");
+  }, T);
+
+  it("jest mixed fixture → same FAIL grammar (location + cause), exit 1", () => {
+    const r = check("jest-mixed");
+    expect(stripDur(r.stdout)).toBe(
+      [
+        "✗ FAIL · 1 passed · 1 failed · 1 skipped · <dur>s",
+        "",
+        "FAIL src/feature.test.js › feature > is broken",
+        "  at src/feature.test.js:6:3",
+        "  Error: expect(received).toBe(expected) // Object.is equality",
+        "",
+      ].join("\n"),
+    );
+    expect(r.code).toBe(1);
+  }, T);
+
+  it("emits the same byte verdict whether vitest or jest produced the run", () => {
+    expect(stripDur(check("jest-pass").stdout)).toBe(
+      stripDur(check("pass").stdout),
+    );
+  }, T);
+});

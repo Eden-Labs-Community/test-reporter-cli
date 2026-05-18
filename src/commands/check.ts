@@ -1,7 +1,7 @@
 import { ConfigError, loadConfig } from "../config/index.js";
 import { RUNNER_ERROR_EXIT, resultExitCode } from "../core/exit.js";
 import { normalize } from "../core/result.js";
-import { RunnerError, runVitest } from "../core/run.js";
+import { RunnerError, runTests } from "../core/run.js";
 import { formatJson } from "../renderers/json.js";
 import { formatText } from "../renderers/summary.js";
 
@@ -19,7 +19,7 @@ export interface CheckOptions {
 export async function runCheck(opts: CheckOptions): Promise<number> {
   try {
     const config = loadConfig(opts.cwd, opts.configPath);
-    const result = normalize(await runVitest(opts.cwd, config));
+    const result = normalize(await runTests(opts.cwd, config));
     const out = opts.json
       ? formatJson(result)
       : formatText(result, {

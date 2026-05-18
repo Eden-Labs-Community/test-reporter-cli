@@ -18,6 +18,7 @@ function writeConfig(dir: string, content: string, name = "test-reporter-config.
 }
 
 const DEFAULTS = {
+  runner: "vitest",
   include: ["src/**/*.test.ts"],
   defaultMode: "standard",
   watch: { followLastSaved: true },
@@ -40,6 +41,25 @@ describe("loadConfig", () => {
     const cfg = loadConfig(dir);
     expect(cfg.summary).toEqual({ detail: "cause", maxFailures: 10 });
     expect(cfg.include).toEqual(DEFAULTS.include);
+  });
+
+  it("defaults runner to vitest and accepts an explicit jest runner", () => {
+    expect(loadConfig(tmp()).runner).toBe("vitest");
+    const dir = tmp();
+    writeConfig(dir, JSON.stringify({ runner: "jest" }));
+    expect(loadConfig(dir).runner).toBe("jest");
+  });
+
+  it("rejects an unknown runner with an actionable ConfigError", () => {
+    const dir = tmp();
+    writeConfig(dir, JSON.stringify({ runner: "mocha" }));
+    try {
+      loadConfig(dir);
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ConfigError);
+      expect((err as ConfigError).message).toContain("runner");
+    }
   });
 
   it("throws an actionable ConfigError on schema-invalid config", () => {

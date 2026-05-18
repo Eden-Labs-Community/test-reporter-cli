@@ -23,7 +23,12 @@ pacote instala e roda fora do repo · PRD/CLAUDE/progress/este doc coerentes.
   caminhos, config cada um em módulo único). *(M1: núcleo pronto p/ M2 reusar.)*
 - [x] **TDD-lite:** todo comportamento nasceu de um teste que falhou primeiro.
 - [x] Invariantes do contrato do `check` (ver M1) **nunca** regridem. *(cobertos por testes)*
-- [x] Resultados sempre via reporter programático do Vitest (zero parsing de stdout).
+- [x] Resultados sempre via **API estruturada do runner** (Vitest/Jest), zero
+  parsing de stdout do relatório humano.
+- [x] **Runner plugável & agnóstico:** `TestRunnerAdapter` (classe abstrata) +
+  factory por `config.runner`; adapters Vitest e Jest; `check` produz contrato
+  **byte-idêntico (módulo duração)** seja qual for o runner; núcleo/normalize/
+  renderers/exit não conhecem o runner. *(prova: e2e de paridade Vitest↔Jest.)*
 - [x] PRD/CLAUDE/progress/este doc refletem a realidade ao fim de cada task.
 
 ## M1 — núcleo p/ o agente (`test-reporter check`)
@@ -35,10 +40,11 @@ pacote instala e roda fora do repo · PRD/CLAUDE/progress/este doc coerentes.
   buildada; scripts `build`/`test`/`lint`; `npx test-reporter --help` funciona.
 - [x] TS `strict` + ESM/NodeNext; `npm run build` sem erros de tipo.
 
-**Núcleo (Vitest)**
-- [x] Roda a suíte Vitest do projeto-alvo via API Node (`startVitest`) +
-  reporter custom → modelo de resultados normalizado (suites, testes, status,
-  duração, falha: `file/line/col/errorType/message`). **Zero** parsing de stdout.
+**Núcleo (runner)**
+- [x] Roda a suíte do projeto-alvo via o **adapter do runner configurado**
+  (Vitest `startVitest` / Jest `runCLI`) → modelo de resultados normalizado
+  (suites, testes, status, duração, falha: `file/line/col/errorType/message`).
+  **Zero** parsing de stdout.
 - [x] Modelo determinístico: falhas ordenadas por (arquivo, nome); caminhos
   relativos POSIX à raiz.
 
@@ -62,14 +68,16 @@ pacote instala e roda fora do repo · PRD/CLAUDE/progress/este doc coerentes.
 **Config (RF-07)**
 - [x] Carrega `test-reporter-config.json` do cwd ou `--config <path>`, valida
   com zod; inválida → exit `>1` + erro acionável; ausente → defaults
-  documentados; `include` / `summary.detail` / `summary.maxFailures` respeitados.
+  documentados; `runner` (vitest|jest, default vitest) / `include` /
+  `summary.detail` / `summary.maxFailures` respeitados.
 
 **Qualidade (TDD-lite + DRY)**
 - [x] Cada critério acima coberto por teste do próprio CLI, escrito **red→green**;
   fixtures: projeto que passa, que falha, misto, config inválida (+ runner-error).
 - [x] Sem lógica duplicada: normalização, formatação texto/JSON, relativização
   e config cada um em módulo único; `check` apenas compõe.
-- [x] `npm test` verde (29); asserções determinísticas dos contratos texto e JSON.
+- [x] `npm test` verde (36); asserções determinísticas dos contratos texto e
+  JSON, **inclusive paridade Vitest↔Jest**.
 
 ## M2 — `test-reporter run` (TUI flagship — RF-09/03/05/01/02)
 

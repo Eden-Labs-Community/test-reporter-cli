@@ -13,6 +13,7 @@ export class ConfigError extends Error {
 
 const ConfigSchema = z
   .object({
+    runner: z.enum(["vitest", "jest"]).default("vitest"),
     include: z.array(z.string()).default(["src/**/*.test.ts"]),
     defaultMode: z.enum(["standard", "watch"]).default("standard"),
     watch: z

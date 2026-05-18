@@ -1,0 +1,1 @@
+{ "runner": "jest", "include": ["**/*.test.js"] }

@@ -35,12 +35,16 @@ públicos distintos**:
   estável**. **Consumidor primário = o Claude usando como ferramenta** num loop
   agêntico (rodar → ler veredito → corrigir). (Milestone M1.)
 
-## Stack (travada)
+## Stack
 
-TypeScript · **ESM** · **Node ≥ 20** · **Vitest** via API Node (`startVitest`) +
-reporter custom com streaming · **Ink** (TUI) · **commander** (args) ·
-**zod** (config). Resultados vêm do reporter programático — nunca parsear stdout
-do Vitest.
+TypeScript · **ESM** · **Node ≥ 20** · **Ink** (TUI, M2) · **commander** (args) ·
+**zod** (config). **Runner plugável** (não mais travado em Vitest): classe
+abstrata `TestRunnerAdapter` + factory pelo campo `runner` do config. Adapters
+no v1: **Vitest** (`startVitest` + reporter silencioso, streaming p/ store/TUI)
+e **Jest** (`@jest/core` `runCLI`, import *lazy* / **peer opcional**).
+Resultados **sempre via API estruturada do runner — nunca parsear stdout** do
+relatório humano. Adicionar runner = **só um novo adapter** (núcleo/contrato
+intactos).
 
 ## Princípios de desenvolvimento (obrigatórios)
 
@@ -70,15 +74,23 @@ Detalhes completos do contrato: **PRD.md §7**.
 
 ## Estrutura do código (M1 criado)
 
-- `src/config` — loader + zod schema/defaults (`ConfigError`).
+- `src/config` — loader + zod schema/defaults (`ConfigError`); campo `runner`.
 - `src/core/result` — modelo normalizado + `normalize` (determinístico).
-- `src/core/run` — `startVitest` + reporter silencioso → `RawRun`; `RunnerError`.
+- `src/core/runner/` — abstração do runner (único lugar que conhece Vitest/Jest):
+  - `adapter` — classe abstrata `TestRunnerAdapter` + `RunnerError`.
+  - `factory` — `createRunner(config)` escolhe o adapter por `config.runner`.
+  - `vitest` — `VitestAdapter` (`startVitest` + reporter silencioso → `RawRun`).
+  - `jest` — `JestAdapter` (`@jest/core` `runCLI` *lazy* → `RawRun`).
+- `src/core/run` — **facade**: `runTests = createRunner(config).run(cwd,config)`;
+  re-exporta `RunnerError`. O resto do CLI nunca sabe qual runner rodou.
 - `src/core/exit` — exit code do resultado (0/1) + `RUNNER_ERROR_EXIT` (2).
 - `src/renderers/summary` — texto PRD §7 (`detail` list/cause, `maxFailures`).
 - `src/renderers/json` — contrato JSON versionado (`schemaVersion`).
 - `src/commands/check` — compõe tudo; veredito→stdout, erros→stderr.
 - `src/cli` — commander (`check`; flags `--cwd/--config/--json`).
-- `test/*.test.ts` unit + `test/e2e.test.ts`; `test/fixtures/*` projetos-alvo.
+- `test/*.test.ts` unit (inclui `runner-factory`) + `test/e2e.test.ts`;
+  `test/fixtures/*` projetos-alvo — `pass/fail/mixed/config-invalid/runner-error`
+  (Vitest) + `jest-pass/jest-mixed` (provam contrato idêntico via Jest).
 - `renderers/tui` (Ink) chega no **M2**.
 
 ## Testes & build
@@ -88,13 +100,18 @@ Detalhes completos do contrato: **PRD.md §7**.
 - **Unit:** módulos puros (normalização, formatters texto/JSON, config+zod,
   exit codes). Sem spawn.
 - **E2E / contrato:** rodam `test-reporter check` **como processo filho**
-  contra *fixtures* (`test/fixtures/`: passa / falha / misto / config inválida
-  / erro de runner) e conferem stdout (snapshot byte-exato), stderr e exit code.
-- ⚠️ **Nunca** chamar o núcleo (que faz `startVitest`) de dentro de um teste
-  Vitest — evitar Vitest-dentro-de-Vitest (reentrância); sempre processo filho.
+  contra *fixtures* (passa / falha / misto / config inválida / erro de runner;
+  + `jest-pass`/`jest-mixed`) e conferem stdout (snapshot byte-exato), stderr e
+  exit code — incluindo um teste de **paridade**: o veredito é byte-idêntico
+  (módulo duração) seja Vitest ou Jest a executar.
+- ⚠️ **Nunca** chamar o núcleo de dentro de um teste Vitest — ele inicia um
+  runner (`startVitest`/`runCLI`); runner-dentro-de-runner = reentrância.
+  Sempre processo filho. (Por isso `runner-factory.test.ts` só **constrói** o
+  adapter, nunca chama `.run()`.)
 - Comandos: `npm run build` (tsc) · `npm test` (vitest run) · `npm run lint`
   (= `tsc --noEmit`). Não precisa buildar p/ testar — e2e roda via `tsx`.
 - Determinismo: a duração (`<n>s`) é runtime; os testes e2e a **normalizam**
   antes de comparar bytes. O contrato é determinístico módulo duração.
-- `line/col` = local da **definição do teste** (`includeTaskLocation`), não o
-  frame exato da assertiva — estável e suficiente p/ o contrato.
+- `line/col` = local da **definição do teste** (Vitest `includeTaskLocation`,
+  Jest `testLocationInResults`), não o frame exato da assertiva — estável,
+  consistente entre runners e suficiente p/ o contrato.

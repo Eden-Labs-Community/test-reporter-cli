@@ -1,7 +1,7 @@
 # PRD — test-reporter-cli
 
-> Documento vivo (v0.7). 🟢 decidido · 🟡 em aberto · 🔵 proposta minha sujeita a validação.
-> **M1 com especificação completa — pronto para implementar.**
+> Documento vivo (v0.8). 🟢 decidido · 🟡 em aberto · 🔵 proposta minha sujeita a validação.
+> **M1 implementado e verde; runner agora plugável (adapters Vitest e Jest).**
 
 ## 1. Visão geral
 
@@ -49,18 +49,22 @@ determinístico e acionável.
 - **Exit code**: `0` tudo passou · `1` algum teste falhou · `>1` erro de
   runner/config. O agente decide sem parsear.
 - **Contrato versionado** (`schemaVersion` no `--json`).
-- Resultados via **reporter programático do Vitest** (sem parsing de stdout).
+- Resultados via **API estruturada do runner** (Vitest/Jest), **nunca** parsing
+  de stdout do relatório humano.
 - Distribuição npm (`bin`), shebang `#!/usr/bin/env node`, build TS→JS.
 
 ## 6. Arquitetura
 
 - **Linguagem:** 🟢 TypeScript.  **Módulos:** 🔵 **ESM** (Vitest 3 e Ink são
   ESM-first).  **Node:** 🔵 **≥ 20 LTS**.
-- **Runner:** 🟢 Vitest via API Node (`startVitest`) + reporter custom com
-  streaming p/ store em memória (alimenta TUI ao vivo e resumo final).
+- **Runner:** 🟢 **plugável** — classe abstrata `TestRunnerAdapter` + factory
+  escolhida pelo campo `runner` do config. **Adapter Vitest** (`startVitest` +
+  reporter silencioso, streaming p/ store/TUI) **e adapter Jest** (`@jest/core`
+  `runCLI`, import *lazy* / peer opcional) no v1. O adapter só produz `RawRun`;
+  normalize/renderers/exit são **runner-agnósticos** (novo runner = novo adapter).
 - **UI:** 🟢 Ink.  **Watch:** 🔵 watcher nativo do Vitest.
 - **Args:** 🔵 `commander`.  **Config:** 🔵 `zod`.
-- **Camadas:** núcleo (Vitest + store) compartilhado; *renderers* plugáveis:
+- **Camadas:** núcleo (adapter do runner + store) compartilhado; *renderers* plugáveis:
   `tui` (Ink, ao vivo) e `summary` (texto estável / `--json`).
 
 ## 7. Contrato da saída — RF-06/RF-08 (`check`) 🟢
@@ -81,6 +85,8 @@ FAIL <arquivo> › <nome completo do teste>
 - **Falha:** status line `✗ FAIL · …` + 1 bloco por falha (arquivo + local +
   causa) e **nada mais no stdout** — sem logs, sem ruído. Exit `1`.
 - Ordenado por (arquivo, nome). Caminhos relativos POSIX. Sem cor (non-TTY).
+- **Runner-agnóstico:** mesmo contrato byte-a-byte (módulo duração) seja Vitest
+  ou Jest a executar — o runner é detalhe de implementação do adapter.
 - Acima de `summary.maxFailures`: imprime N e `… +<k> more (use --json)`.
 
 **`test-reporter check --json`:**
@@ -99,6 +105,7 @@ Em sucesso: `"status": "pass"`, `"ok": true`, `"failed": 0`, `"failures": []`.
 
 ```json
 {
+  "runner": "vitest",
   "include": ["src/**/*.test.ts"],
   "defaultMode": "standard",
   "watch": { "followLastSaved": true },
@@ -107,7 +114,8 @@ Em sucesso: `"status": "pass"`, `"ok": true`, `"failed": 0`, `"failures": []`.
 }
 ```
 
-(`framework` fixo em Vitest no v1.)
+(`runner`: `"vitest"` | `"jest"`, default `"vitest"`. Novos runners = novo
+adapter, sem mudar schema/contrato.)
 
 ## 9. Comandos / UX 🔵
 
@@ -124,13 +132,23 @@ Em sucesso: `"status": "pass"`, `"ok": true`, `"failed": 0`, `"failures": []`.
 
 **Resolvidas 🟢**
 
-1. Vitest. 2. TypeScript. 3. Ink. 4. RF-06 = comando, não arquivo.
+1. Vitest *(revisto em #17: runner plugável)*. 2. TypeScript. 3. Ink. 4. RF-06 = comando, não arquivo.
 5. Consumidor primário do contrato: Claude. 6. Saída base: lista compacta.
 7. Disparo headless: non-TTY + `--summary`. 8. Detalhe: lista + causa + local.
 9. RF-08: comando dedicado separado do `run`. 10. `run` = principal, TUI ao vivo.
 11. Nome do comando RF-08: `check`.
 12. **`check` nunca é vazio: sucesso = `✓ PASS …` explícito; falha = `✗ FAIL …`
     + só os blocos de erro, nada mais no stdout.**
+17. **Runner plugável — revisa a decisão #1 (2026-05-18).** O runner deixa de
+    ser fixo em Vitest: vira `TestRunnerAdapter` (classe abstrata) + factory
+    escolhida pelo campo `runner` do `test-reporter-config.json`. Adapters
+    **Vitest** e **Jest** entregues no v1; `check` produz o **mesmo contrato
+    byte-a-byte (módulo duração)** independente do runner. *Motivo:* rodar
+    projetos Jest (ou outro runner futuro) sem tocar núcleo/normalize/contrato —
+    **novo runner = só um novo adapter**. *Implicações:* Jest é **peer
+    opcional** (import *lazy*; `runner:"jest"` sem Jest instalado → `RunnerError`,
+    exit > 1, sem falso PASS); invariante "sem parsing de stdout" generalizado
+    para "via API estruturada do runner".
 
 **Propostas a confirmar 🔵**
 
@@ -149,8 +167,9 @@ Coverage, monorepo multi-projeto, dashboard web, histórico entre rodadas.
 
 ## 12. Roadmap
 
-- **M1 (núcleo p/ o agente) — spec completa:** `test-reporter check` + contrato
-  da saída (seção 7) + config (RF-07) + RF-01/02. Já testável pelo Claude.
+- **M1 (núcleo p/ o agente) — implementado e verde:** `test-reporter check` +
+  contrato (seção 7) + config (RF-07) + RF-01/02 + **runner plugável (adapters
+  Vitest e Jest)**. Testável pelo Claude.
 - **M2 (UX flagship):** `test-reporter run` TUI caprichada ao vivo (RF-09/03/05).
 - **M3:** `watch` (RF-04).
 - **M4:** polimento (`init`, temas, distribuição npm).

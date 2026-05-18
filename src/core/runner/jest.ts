@@ -1,7 +1,11 @@
 import type { Config } from "../../config/index.js";
 import type { RunEventSink } from "../events.js";
 import type { RawRun, RawTest, RawTestError, TestStatus } from "../result.js";
-import { RunnerError, TestRunnerAdapter } from "./adapter.js";
+import {
+  RunnerError,
+  TestRunnerAdapter,
+  type WatchHandle,
+} from "./adapter.js";
 
 /**
  * Minimal structural view of `@jest/core`'s `runCLI` result. We never depend
@@ -152,5 +156,15 @@ export class JestAdapter extends TestRunnerAdapter {
       onEvent({ type: "done", run });
     }
     return run;
+  }
+
+  // eslint-disable-next-line @typescript-eslint/require-await
+  async watch(): Promise<WatchHandle> {
+    // Watch needs incremental streaming, which the Jest adapter does not have
+    // in v1 (batch-at-done; tracked M4 debt). Fail loud — never a false PASS.
+    throw new RunnerError(
+      'watch is only supported with the Vitest runner in v1 (runner is "jest"). ' +
+        "Use `test-reporter check` for a one-shot Jest verdict.",
+    );
   }
 }

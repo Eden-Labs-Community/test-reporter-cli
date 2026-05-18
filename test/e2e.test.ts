@@ -15,7 +15,11 @@ interface Run {
   stderr: string;
   code: number;
 }
-function cli(cmd: "check" | "run", fixtureName: string, extra: string[]): Run {
+function cli(
+  cmd: "check" | "run" | "watch",
+  fixtureName: string,
+  extra: string[],
+): Run {
   const r = spawnSync(
     TSX,
     [CLI, cmd, "--cwd", fixture(fixtureName), ...extra],
@@ -27,6 +31,8 @@ const check = (fixtureName: string, extra: string[] = []): Run =>
   cli("check", fixtureName, extra);
 const run = (fixtureName: string, extra: string[] = []): Run =>
   cli("run", fixtureName, extra);
+const watch = (fixtureName: string, extra: string[] = []): Run =>
+  cli("watch", fixtureName, extra);
 /** Duration is inherently non-deterministic; normalize it for byte assertions. */
 const stripDur = (s: string) => s.replace(/\d+\.\d+s/g, "<dur>s");
 
@@ -165,6 +171,47 @@ describe("run (e2e) — non-TTY falls back to the check contract", () => {
 
   it("run keeps exit > 1 + clean stdout on a runner error", () => {
     const a = run("runner-error");
+    expect(a.stdout).toBe("");
+    expect(a.code).toBe(2);
+    expect(a.stderr).toContain("RunnerError");
+  }, T);
+});
+
+// `watch` is an interactive TUI, but headless (non-TTY here) it MUST collapse
+// to a single `check` run — same bytes, same exit codes (the watcher never
+// boots, so this is deterministic and safe to spawn). The watch render/loop
+// itself is pty-smoke only (see CLAUDE.md: Ink not auto-tested).
+describe("watch (e2e) — non-TTY falls back to the check contract", () => {
+  it("watch == check on a passing project (exit 0)", () => {
+    const a = watch("pass");
+    expect(stripDur(a.stdout)).toBe(stripDur(check("pass").stdout));
+    expect(a.code).toBe(0);
+    expect(a.stderr).toBe("");
+  }, T);
+
+  it("watch == check on failures, incl. exit 1 and --json", () => {
+    const a = watch("mixed");
+    expect(stripDur(a.stdout)).toBe(stripDur(check("mixed").stdout));
+    expect(a.code).toBe(1);
+    const noDur = (s: string) => {
+      const o = JSON.parse(s);
+      delete o.durationMs;
+      return o;
+    };
+    expect(noDur(watch("mixed", ["--json"]).stdout)).toEqual(
+      noDur(check("mixed", ["--json"]).stdout),
+    );
+  }, T);
+
+  it("watch == check through the jest adapter too (headless, runner-agnostic)", () => {
+    expect(stripDur(watch("jest-pass").stdout)).toBe(
+      stripDur(check("jest-pass").stdout),
+    );
+    expect(watch("jest-mixed").code).toBe(1);
+  }, T);
+
+  it("watch keeps exit > 1 + clean stdout on a runner error", () => {
+    const a = watch("runner-error");
     expect(a.stdout).toBe("");
     expect(a.code).toBe(2);
     expect(a.stderr).toContain("RunnerError");

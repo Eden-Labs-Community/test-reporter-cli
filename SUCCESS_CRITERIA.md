@@ -109,17 +109,27 @@ pacote instala e roda fora do repo · PRD/CLAUDE/progress/este doc coerentes.
 
 ## M3 — `test-reporter watch` (RF-04)
 
-- [ ] Usa o watcher nativo do Vitest; re-roda ao salvar.
-- [ ] Ao salvar um arquivo de teste, a UI **foca a suíte daquele arquivo**
-  (último salvo) e mostra a execução ao vivo (RF-04).
-- [ ] **Decisão #14 do PRD resolvida e implementada** (rodar só o arquivo
-  salvo vs rodar tudo e focar).
-- [ ] Teclas: `a` re-roda tudo, `f` só falhas, `q` sai; estado de watch
-  visível no cabeçalho.
-- [ ] Ctrl-C / `q` encerra limpo — sem watcher/processo vazado.
-- [ ] **DRY:** reusa núcleo/modelo/renderer de M1/M2.
-- [ ] Testes: "qual suíte focar dado o último arquivo salvo" e lógica de
-  re-execução cobertas por unidade.
+- [x] Usa o **watcher nativo do Vitest**; re-roda ao salvar (decisão #19).
+  *(diagnóstico event-level num path real: save → `RERUN{trigger}` →
+  re-execução do código novo → `DONE` com o veredito atualizado.)*
+- [x] Ao salvar, a UI **foca a suíte do último arquivo salvo** (cabeçalho
+  `↻ saved: …`) e mostra a execução ao vivo; contadores zeram por ciclo;
+  decisão #18 re-aplica (RF-04). *(store pura testada; pty-smoke confirmou.)*
+- [x] **Decisão #14 do PRD resolvida e implementada** → **#19** (watcher
+  nativo = testes **relacionados** pelo grafo; nem só-o-arquivo nem tudo).
+- [x] Teclas: `a` re-roda tudo, `f` só falhas, `q`/Ctrl-C sai; estado de
+  watch no cabeçalho. *(`a`/`f` → `command` seq na store, testada; o handle
+  é dirigido por `renderWatchTui`.)*
+- [x] Ctrl-C / `q` encerra limpo — `WatchHandle.close()` (`vitest.close()`)
+  no fim do `renderWatchTui`, sem watcher/processo vazado.
+- [x] **DRY:** reusa núcleo/modelo/store/`App`/`failureBlock` de M1/M2;
+  helpers `collectAll`/`collectionError` compartilham coleta com o `run`
+  1-shot (refactor byte-idêntico, contrato `check` intacto). Watch é
+  **Vitest-only no v1** (`jest.watch`→`RunnerError`; débito M4).
+- [x] Testes (unit, sem render real): ciclo `rerun` (reset + `watchTrigger`
+  RF-04) e teclas `a`/`f` na store; guard `jest.watch`; e2e `watch`≡`check`
+  (Vitest+Jest, exit codes, runner-error). **60 verdes.** O loop watch+Ink
+  não é unit-testável (reentrância) → pty-smoke + diagnóstico event-level.
 
 ## M4 — polimento & release
 
@@ -127,9 +137,10 @@ pacote instala e roda fora do repo · PRD/CLAUDE/progress/este doc coerentes.
   zod) com defaults documentados.
 - [ ] `ui.theme` (auto/claro/escuro), `NO_COLOR` e `--no-color` respeitados.
 - [ ] `--help`/`--version` completos por comando; mensagens de erro acionáveis.
-- [ ] **Débitos herdados do M2:** streaming **incremental no Jest** (hoje
-  batch); **árvore de suítes navegável** no resumo; **diff/code-frame** rico
-  no detalhe da falha; flag **`--no-color`** explícita.
+- [ ] **Débitos herdados de M2/M3:** streaming **incremental no Jest** (hoje
+  batch — **habilita `watch` p/ Jest**, hoje `jest.watch`→`RunnerError`);
+  **árvore de suítes navegável** no resumo; **diff/code-frame** rico no
+  detalhe da falha; flag **`--no-color`** explícita.
 - [ ] **Publicável:** `bin` + shebang corretos, `exports`/`files`, build limpo;
   `npm pack` instalável; `npx test-reporter` funciona **fora** do repo.
 - [ ] `README` com uso (incl. **como o Claude deve chamar `check`**) e o

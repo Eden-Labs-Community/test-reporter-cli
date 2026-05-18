@@ -95,6 +95,57 @@ describe("tui store", () => {
   });
 });
 
+describe("tui store — watch (M3)", () => {
+  const finished = (...tests: RawTest[]): RawRun => ({
+    rootDir: ROOT,
+    durationMs: 1000,
+    tests,
+  });
+
+  it("rerun resets the per-cycle counters, returns to running/overview, records the trigger (RF-04)", () => {
+    let s = initState(ROOT);
+    s = feed(s, t("a.test.ts", "f", "failed", { name: "E", message: "m" }));
+    s = reduce(s, {
+      type: "done",
+      run: finished(t("a.test.ts", "f", "failed", { name: "E", message: "m" })),
+    });
+    expect(s.phase).toBe("done");
+
+    s = reduce(s, { type: "rerun", trigger: `${ROOT}/a.test.ts` });
+    expect(s.phase).toBe("running");
+    expect(s.tests).toEqual([]);
+    expect(s.result.passed).toBe(0);
+    expect(s.result.failed).toBe(0);
+    expect(s.view).toBe("overview");
+    expect(s.watchTrigger).toBe(`${ROOT}/a.test.ts`);
+  });
+
+  it("after a rerun, decision #18 still steals focus on a new failure", () => {
+    let s = initState(ROOT);
+    s = reduce(s, {
+      type: "done",
+      run: finished(t("a.test.ts", "ok", "passed")),
+    });
+    s = reduce(s, { type: "rerun", trigger: `${ROOT}/a.test.ts` });
+    s = feed(s, t("a.test.ts", "boom", "failed", { name: "E", message: "x" }));
+    expect(s.view).toBe("failure");
+    expect(s.result.failures[s.focused]?.test).toBe("boom");
+  });
+
+  it("a/f request a watch command via a monotonic seq; q still exits", () => {
+    let s = initState(ROOT);
+    expect(s.command).toBeUndefined();
+    s = reduce(s, { type: "key", key: "a" });
+    expect(s.command).toEqual({ kind: "all", seq: 1 });
+    s = reduce(s, { type: "key", key: "f" });
+    expect(s.command).toEqual({ kind: "failed", seq: 2 });
+    s = reduce(s, { type: "key", key: "a" }); // repeating a kind still bumps seq
+    expect(s.command).toEqual({ kind: "all", seq: 3 });
+    s = reduce(s, { type: "key", key: "q" });
+    expect(s.exited).toBe(true);
+  });
+});
+
 describe("createStore", () => {
   it("applies reduce and notifies/unsubscribes subscribers", () => {
     const store = createStore(ROOT);

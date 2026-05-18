@@ -5,6 +5,7 @@ import { Command } from "commander";
 
 import { runCheck } from "./commands/check.js";
 import { runRun } from "./commands/run.js";
+import { runWatch } from "./commands/watch.js";
 
 const program = new Command();
 
@@ -32,6 +33,32 @@ program
       summary?: boolean;
     }) => {
       const code = await runRun({
+        cwd: resolve(opts.cwd),
+        configPath: opts.config,
+        json: Boolean(opts.json),
+        summary: Boolean(opts.summary),
+      });
+      process.exit(code);
+    },
+  );
+
+program
+  .command("watch")
+  .description(
+    "Live TUI that re-runs on save (Vitest native watcher; focuses the saved file's suite). Headless (CI/pipe/--summary/--json) → one `check` run.",
+  )
+  .option("--cwd <dir>", "project directory", process.cwd())
+  .option("--config <path>", "path to test-reporter-config.json")
+  .option("--json", "headless: emit the stable, versioned JSON contract")
+  .option("--summary", "force the headless text verdict instead of the TUI")
+  .action(
+    async (opts: {
+      cwd: string;
+      config?: string;
+      json?: boolean;
+      summary?: boolean;
+    }) => {
+      const code = await runWatch({
         cwd: resolve(opts.cwd),
         configPath: opts.config,
         json: Boolean(opts.json),

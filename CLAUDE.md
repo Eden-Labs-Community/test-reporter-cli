@@ -26,23 +26,29 @@ Esses quatro devem sempre refletir a realidade atual.
 
 ## O que é o projeto
 
-`test-reporter-cli`: CLI de relatório de testes com **dois comandos e dois
+`test-reporter-cli`: CLI de relatório de testes com **três comandos e dois
 públicos distintos**:
 
 - **`test-reporter run`** — TUI (Ink) bonita e ao vivo, para devs; comando
   default. Foca a falha no instante em que acontece (decisão #18). Non-TTY/CI/
   `--summary`/`--json` → cai no contrato do `check`. UX flagship. **(M2 ✔)**
+- **`test-reporter watch`** — mesma TUI, re-rodando ao salvar via o **watcher
+  nativo do Vitest** (decisão #19: testes relacionados pelo grafo); a UI foca
+  a suíte do **último arquivo salvo** (RF-04); `a`=tudo `f`=só falhas. Watch é
+  **Vitest-only no v1** (Jest = débito M4). Non-TTY → contrato do `check`.
+  **(M3 ✔)**
 - **`test-reporter check`** — headless, determinístico, com **contrato de saída
   estável**. **Consumidor primário = o Claude usando como ferramenta** num loop
   agêntico (rodar → ler veredito → corrigir). **(M1 ✔)**
 
 ## Stack
 
-TypeScript · **ESM** · **Node ≥ 20** · **Ink** (TUI, M2) · **commander** (args) ·
-**zod** (config). **Runner plugável** (não mais travado em Vitest): classe
-abstrata `TestRunnerAdapter` + factory pelo campo `runner` do config. Adapters
-no v1: **Vitest** (`startVitest` + reporter silencioso, streaming p/ store/TUI)
-e **Jest** (`@jest/core` `runCLI`, import *lazy* / **peer opcional**).
+TypeScript · **ESM** · **Node ≥ 20** · **Ink** (TUI, M2/M3) · **commander**
+(args) · **zod** (config). **Runner plugável** (não mais travado em Vitest):
+classe abstrata `TestRunnerAdapter` + factory pelo campo `runner` do config.
+Adapters no v1: **Vitest** (`startVitest` + reporter silencioso, streaming p/
+store/TUI; `watch:true` = **watcher nativo**, M3) e **Jest** (`@jest/core`
+`runCLI`, import *lazy* / **peer opcional**; sem watch no v1 → `RunnerError`).
 Resultados **sempre via API estruturada do runner — nunca parsear stdout** do
 relatório humano. Adicionar runner = **só um novo adapter** (núcleo/contrato
 intactos).
@@ -73,37 +79,50 @@ intactos).
 
 Detalhes completos do contrato: **PRD.md §7**.
 
-## Estrutura do código (M1 + M2 criados)
+## Estrutura do código (M1 + M2 + M3 criados)
 
 - `src/config` — loader + zod schema/defaults (`ConfigError`); campo `runner`.
 - `src/core/result` — modelo normalizado + `normalize` (determinístico).
 - `src/core/runner/` — abstração do runner (único lugar que conhece Vitest/Jest):
-  - `adapter` — classe abstrata `TestRunnerAdapter` + `RunnerError`.
+  - `adapter` — classe abstrata `TestRunnerAdapter` (`run` + `watch`) +
+    `RunnerError` + `WatchHandle` (`triggerAll`/`triggerFailed`/`close`).
   - `factory` — `createRunner(config)` escolhe o adapter por `config.runner`.
-  - `vitest` — `VitestAdapter` (`startVitest` + reporter silencioso → `RawRun`).
-  - `jest` — `JestAdapter` (`@jest/core` `runCLI` *lazy* → `RawRun`).
-- `src/core/run` — **facade**: `runTests(cwd,config,onEvent?)`; re-exporta
-  `RunnerError`. `onEvent` opcional = streaming p/ TUI; sem ele = silencioso
-  (`check` inalterado). O resto do CLI nunca sabe qual runner rodou.
-- `src/core/events` — `RunEvent` (`test`/`done`) + `pickUnemitted` (dedupe
-  de streaming, runner-agnóstico).
+  - `vitest` — `VitestAdapter` (`startVitest` → `RawRun`; `watch:true` =
+    watcher nativo, emite `rerun`/`test`/`done` por ciclo). Helpers DRY
+    `collectAll`/`collectionError` (compartilhados por `run` 1-shot + watch).
+  - `jest` — `JestAdapter` (`@jest/core` `runCLI` *lazy* → `RawRun`); `watch`
+    lança `RunnerError` (Vitest-only no v1; débito M4).
+- `src/core/run` — **facade**: `runTests(cwd,config,onEvent?)` +
+  `watchTests(cwd,config,onEvent)`; re-exporta `RunnerError` e o tipo
+  `WatchHandle`. `onEvent` opcional no `run` = streaming p/ TUI; sem ele =
+  silencioso (`check` inalterado). O resto do CLI nunca sabe qual runner rodou.
+- `src/core/events` — `RunEvent` (`test`/`done`/**`rerun`** — watch, com
+  `trigger`) + `pickUnemitted` (dedupe de streaming, runner-agnóstico).
 - `src/core/exit` — exit code do resultado (0/1) + `RUNNER_ERROR_EXIT` (2).
 - `src/renderers/summary` — texto PRD §7; `failureBlock` **exportado** (reuso
   na TUI — DRY).
 - `src/renderers/json` — contrato JSON versionado (`schemaVersion`).
 - `src/tui/store` — **store pura** (reducer): decisão #18 (last-failed-wins),
-  `n`/`p`/`esc`/`q`, `done` autoritativo. Sem React. `tui/createStore` —
-  observable fininha p/ `useSyncExternalStore`.
-- `src/renderers/tui` — Ink: `App.tsx` (Overview/FailureView + `useInput`),
-  `index.ts` `renderTui` (só TTY; erro de runner → stderr + exit > 1).
+  `n`/`p`/`esc`/`q`, `done` autoritativo; **M3**: `rerun` (zera ciclo + grava
+  `watchTrigger` p/ RF-04), teclas `a`/`f` → `command` (seq monotônica que a
+  borda consome — mesma disciplina do `exited`). Sem React. `tui/createStore`
+  — observable fininha p/ `useSyncExternalStore`.
+- `src/renderers/tui` — Ink: `App.tsx` (Overview/FailureView + `useInput`;
+  prop `watch` → cabeçalho `↻ saved:` + teclas `a`/`f`); `index.ts`
+  `renderTui` (run, 1-shot) e **`renderWatchTui`** (watch: dirige o
+  `WatchHandle` pela `command` seq da store; `q`/Ctrl-C → `close()` sem
+  watcher vazado). Só TTY; erro de runner → stderr + exit > 1.
 - `src/commands/check` — compõe; veredito→stdout, erros→stderr.
 - `src/commands/run` — TTY → `renderTui`; headless → delega `runCheck` (DRY).
-- `src/cli` — commander (`run` default + `check`; `--cwd/--config/--json`,
-  `run` tem `--summary`).
-- `test/*.test.ts` unit (inclui `runner-factory`) + `test/e2e.test.ts`;
-  `test/fixtures/*` projetos-alvo — `pass/fail/mixed/config-invalid/runner-error`
-  (Vitest) + `jest-pass/jest-mixed` (provam contrato idêntico via Jest).
-- M3 (`watch`) e M4 (polimento) ainda não criados.
+- `src/commands/watch` — TTY → `renderWatchTui`; headless → `runCheck`
+  (1 execução = contrato do `check`, DRY).
+- `src/cli` — commander (`run` default + `watch` + `check`;
+  `--cwd/--config/--json`, `run`/`watch` têm `--summary`).
+- `test/*.test.ts` unit (inclui `runner-factory` — também afirma o guard
+  `jest.watch`→`RunnerError`, sem nunca chamar `.run()`/`.watch()` real) +
+  `test/e2e.test.ts`; `test/fixtures/*` — `pass/fail/mixed/config-invalid/
+  runner-error` (Vitest) + `jest-pass/jest-mixed` (contrato idêntico via Jest).
+- M4 (polimento) ainda não criado.
 
 ## Testes & build
 

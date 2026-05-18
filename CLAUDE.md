@@ -68,10 +68,18 @@ do Vitest.
 
 Detalhes completos do contrato: **PRD.md §7**.
 
-## Estrutura alvo do código
+## Estrutura do código (M1 criado)
 
-`src/core` (Vitest + store de resultados) · `src/renderers` (`summary`, `tui`) ·
-`src/commands` · `src/config`. Ainda **não criada** — ver `progress.md`.
+- `src/config` — loader + zod schema/defaults (`ConfigError`).
+- `src/core/result` — modelo normalizado + `normalize` (determinístico).
+- `src/core/run` — `startVitest` + reporter silencioso → `RawRun`; `RunnerError`.
+- `src/core/exit` — exit code do resultado (0/1) + `RUNNER_ERROR_EXIT` (2).
+- `src/renderers/summary` — texto PRD §7 (`detail` list/cause, `maxFailures`).
+- `src/renderers/json` — contrato JSON versionado (`schemaVersion`).
+- `src/commands/check` — compõe tudo; veredito→stdout, erros→stderr.
+- `src/cli` — commander (`check`; flags `--cwd/--config/--json`).
+- `test/*.test.ts` unit + `test/e2e.test.ts`; `test/fixtures/*` projetos-alvo.
+- `renderers/tui` (Ink) chega no **M2**.
 
 ## Testes & build
 
@@ -84,5 +92,9 @@ Detalhes completos do contrato: **PRD.md §7**.
   / erro de runner) e conferem stdout (snapshot byte-exato), stderr e exit code.
 - ⚠️ **Nunca** chamar o núcleo (que faz `startVitest`) de dentro de um teste
   Vitest — evitar Vitest-dentro-de-Vitest (reentrância); sempre processo filho.
-- Comandos (`build` / `test` / `lint`): a definir no scaffold — **atualizar
-  esta seção** com os comandos reais assim que existirem.
+- Comandos: `npm run build` (tsc) · `npm test` (vitest run) · `npm run lint`
+  (= `tsc --noEmit`). Não precisa buildar p/ testar — e2e roda via `tsx`.
+- Determinismo: a duração (`<n>s`) é runtime; os testes e2e a **normalizam**
+  antes de comparar bytes. O contrato é determinístico módulo duração.
+- `line/col` = local da **definição do teste** (`includeTaskLocation`), não o
+  frame exato da assertiva — estável e suficiente p/ o contrato.

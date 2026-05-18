@@ -17,58 +17,59 @@ pacote instala e roda fora do repo · PRD/CLAUDE/progress/este doc coerentes.
 
 ## Globais (cross-cutting — valem em qualquer milestone)
 
-- [ ] **ESM**, **Node ≥ 20**, TS `strict`; `npm run build` sem erro de tipo.
-- [ ] **DRY:** um único núcleo + modelo de resultados; `check`/`run`/`watch`
+- [x] **ESM**, **Node ≥ 20**, TS `strict`; `npm run build` sem erro de tipo.
+- [x] **DRY:** um único núcleo + modelo de resultados; `check`/`run`/`watch`
   só trocam o *renderer*, nunca duplicam lógica (normalização, formatters,
-  caminhos, config cada um em módulo único).
-- [ ] **TDD-lite:** todo comportamento nasceu de um teste que falhou primeiro.
-- [ ] Invariantes do contrato do `check` (ver M1) **nunca** regridem.
-- [ ] Resultados sempre via reporter programático do Vitest (zero parsing de stdout).
-- [ ] PRD/CLAUDE/progress/este doc refletem a realidade ao fim de cada task.
+  caminhos, config cada um em módulo único). *(M1: núcleo pronto p/ M2 reusar.)*
+- [x] **TDD-lite:** todo comportamento nasceu de um teste que falhou primeiro.
+- [x] Invariantes do contrato do `check` (ver M1) **nunca** regridem. *(cobertos por testes)*
+- [x] Resultados sempre via reporter programático do Vitest (zero parsing de stdout).
+- [x] PRD/CLAUDE/progress/este doc refletem a realidade ao fim de cada task.
 
 ## M1 — núcleo p/ o agente (`test-reporter check`)
 
 > Cada item é verificável e vira um teste (red → green). M1 só fecha com **todos** marcados.
 
 **Scaffold**
-- [ ] `package.json` ESM (`"type": "module"`), `bin.test-reporter` → entry
+- [x] `package.json` ESM (`"type": "module"`), `bin.test-reporter` → entry
   buildada; scripts `build`/`test`/`lint`; `npx test-reporter --help` funciona.
-- [ ] TS `strict` + ESM/NodeNext; `npm run build` sem erros de tipo.
+- [x] TS `strict` + ESM/NodeNext; `npm run build` sem erros de tipo.
 
 **Núcleo (Vitest)**
-- [ ] Roda a suíte Vitest do projeto-alvo via API Node (`startVitest`) +
+- [x] Roda a suíte Vitest do projeto-alvo via API Node (`startVitest`) +
   reporter custom → modelo de resultados normalizado (suites, testes, status,
   duração, falha: `file/line/col/errorType/message`). **Zero** parsing de stdout.
-- [ ] Modelo determinístico: falhas ordenadas por (arquivo, nome); caminhos
+- [x] Modelo determinístico: falhas ordenadas por (arquivo, nome); caminhos
   relativos POSIX à raiz.
 
 **Contrato `check` — texto (PRD §7)**
-- [ ] Tudo passa → stdout = exatamente
+- [x] Tudo passa → stdout = exatamente
   `✓ PASS · <P> passed · 0 failed · <S> skipped · <dur>s`; exit `0`; nunca vazio.
-- [ ] ≥1 falha → `✗ FAIL · …` + linha em branco + 1 bloco por falha
+- [x] ≥1 falha → `✗ FAIL · …` + linha em branco + 1 bloco por falha
   (`FAIL arquivo › nome` / `  at arquivo:linha[:col]` / `  Tipo: 1ª linha`);
   exit `1`; **nada mais** no stdout.
-- [ ] Mesma execução ⇒ stdout **byte-idêntico**.
-- [ ] Sem ANSI em non-TTY; logs/diagnóstico só no stderr.
-- [ ] Acima de `summary.maxFailures`: N blocos + `… +<k> more (use --json)`.
-- [ ] Erro de runner/config → exit `>1` + erro claro no stderr (nunca PASS falso).
+- [x] Mesma execução ⇒ stdout **byte-idêntico** *(módulo `duração`, que é
+  runtime — normalizada nos testes e2e; contrato determinístico módulo duração)*.
+- [x] Sem ANSI em non-TTY; logs/diagnóstico só no stderr.
+- [x] Acima de `summary.maxFailures`: N blocos + `… +<k> more (use --json)`.
+- [x] Erro de runner/config → exit `>1` + erro claro no stderr (nunca PASS falso).
 
 **Contrato `check --json`**
-- [ ] 1 objeto JSON válido: `schemaVersion, status, ok, passed, failed,
+- [x] 1 objeto JSON válido: `schemaVersion, status, ok, passed, failed,
   skipped, total, durationMs, failures[]`; sucesso → `status:"pass", ok:true,
   failures:[]`; lista **todas** as falhas (ignora `maxFailures`); mesmos exit codes.
 
 **Config (RF-07)**
-- [ ] Carrega `test-reporter-config.json` do cwd ou `--config <path>`, valida
+- [x] Carrega `test-reporter-config.json` do cwd ou `--config <path>`, valida
   com zod; inválida → exit `>1` + erro acionável; ausente → defaults
   documentados; `include` / `summary.detail` / `summary.maxFailures` respeitados.
 
 **Qualidade (TDD-lite + DRY)**
-- [ ] Cada critério acima coberto por teste do próprio CLI, escrito **red→green**;
-  fixtures: projeto que passa, que falha, misto, config inválida.
-- [ ] Sem lógica duplicada: normalização, formatação texto/JSON, relativização
+- [x] Cada critério acima coberto por teste do próprio CLI, escrito **red→green**;
+  fixtures: projeto que passa, que falha, misto, config inválida (+ runner-error).
+- [x] Sem lógica duplicada: normalização, formatação texto/JSON, relativização
   e config cada um em módulo único; `check` apenas compõe.
-- [ ] `npm test` verde; snapshots determinísticos dos contratos texto e JSON.
+- [x] `npm test` verde (29); asserções determinísticas dos contratos texto e JSON.
 
 ## M2 — `test-reporter run` (TUI flagship — RF-09/03/05/01/02)
 

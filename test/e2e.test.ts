@@ -15,14 +15,18 @@ interface Run {
   stderr: string;
   code: number;
 }
-function check(fixtureName: string, extra: string[] = []): Run {
+function cli(cmd: "check" | "run", fixtureName: string, extra: string[]): Run {
   const r = spawnSync(
     TSX,
-    [CLI, "check", "--cwd", fixture(fixtureName), ...extra],
+    [CLI, cmd, "--cwd", fixture(fixtureName), ...extra],
     { encoding: "utf8" },
   );
   return { stdout: r.stdout ?? "", stderr: r.stderr ?? "", code: r.status ?? -1 };
 }
+const check = (fixtureName: string, extra: string[] = []): Run =>
+  cli("check", fixtureName, extra);
+const run = (fixtureName: string, extra: string[] = []): Run =>
+  cli("run", fixtureName, extra);
 /** Duration is inherently non-deterministic; normalize it for byte assertions. */
 const stripDur = (s: string) => s.replace(/\d+\.\d+s/g, "<dur>s");
 
@@ -124,5 +128,45 @@ describe("check (e2e) — jest adapter", () => {
     expect(stripDur(check("jest-pass").stdout)).toBe(
       stripDur(check("pass").stdout),
     );
+  }, T);
+});
+
+// `run` is the flagship TUI, but headless (non-TTY: piped stdout here) it MUST
+// fall back to the exact `check` contract — same bytes, same exit codes.
+describe("run (e2e) — non-TTY falls back to the check contract", () => {
+  it("run == check on a passing project (exit 0)", () => {
+    const a = run("pass");
+    expect(stripDur(a.stdout)).toBe(stripDur(check("pass").stdout));
+    expect(a.code).toBe(0);
+    expect(a.stderr).toBe("");
+  }, T);
+
+  it("run == check on failures, incl. exit 1 and --json", () => {
+    const a = run("mixed");
+    expect(stripDur(a.stdout)).toBe(stripDur(check("mixed").stdout));
+    expect(a.code).toBe(1);
+    // JSON contract carries runtime durationMs by design — compare modulo it.
+    const noDur = (s: string) => {
+      const o = JSON.parse(s);
+      delete o.durationMs;
+      return o;
+    };
+    expect(noDur(run("mixed", ["--json"]).stdout)).toEqual(
+      noDur(check("mixed", ["--json"]).stdout),
+    );
+  }, T);
+
+  it("run == check through the jest adapter too", () => {
+    expect(stripDur(run("jest-pass").stdout)).toBe(
+      stripDur(check("jest-pass").stdout),
+    );
+    expect(run("jest-mixed").code).toBe(1);
+  }, T);
+
+  it("run keeps exit > 1 + clean stdout on a runner error", () => {
+    const a = run("runner-error");
+    expect(a.stdout).toBe("");
+    expect(a.code).toBe(2);
+    expect(a.stderr).toContain("RunnerError");
   }, T);
 });

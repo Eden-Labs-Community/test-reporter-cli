@@ -1,4 +1,5 @@
 import type { Config } from "../../config/index.js";
+import type { RunEventSink } from "../events.js";
 import type { RawRun } from "../result.js";
 
 /**
@@ -25,6 +26,14 @@ export abstract class TestRunnerAdapter {
   /** Stable identifier, must equal the `runner` config value it serves. */
   abstract readonly name: string;
 
-  /** Run the suite once. Throws {@link RunnerError} if the runner fails. */
-  abstract run(cwd: string, config: Config): Promise<RawRun>;
+  /**
+   * Run the suite once. Throws {@link RunnerError} if the runner fails.
+   * `onEvent` (optional) receives live lifecycle events for the TUI; when
+   * omitted (e.g. `check`) the run is silent and the M1 contract is unchanged.
+   */
+  abstract run(
+    cwd: string,
+    config: Config,
+    onEvent?: RunEventSink,
+  ): Promise<RawRun>;
 }

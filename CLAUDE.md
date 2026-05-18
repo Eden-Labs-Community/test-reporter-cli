@@ -29,11 +29,12 @@ Esses quatro devem sempre refletir a realidade atual.
 `test-reporter-cli`: CLI de relatório de testes com **dois comandos e dois
 públicos distintos**:
 
-- **`test-reporter run`** — TUI (Ink) bonita e em tempo real, para devs.
-  É a UX flagship. (Milestone M2.)
+- **`test-reporter run`** — TUI (Ink) bonita e ao vivo, para devs; comando
+  default. Foca a falha no instante em que acontece (decisão #18). Non-TTY/CI/
+  `--summary`/`--json` → cai no contrato do `check`. UX flagship. **(M2 ✔)**
 - **`test-reporter check`** — headless, determinístico, com **contrato de saída
   estável**. **Consumidor primário = o Claude usando como ferramenta** num loop
-  agêntico (rodar → ler veredito → corrigir). (Milestone M1.)
+  agêntico (rodar → ler veredito → corrigir). **(M1 ✔)**
 
 ## Stack
 
@@ -72,7 +73,7 @@ intactos).
 
 Detalhes completos do contrato: **PRD.md §7**.
 
-## Estrutura do código (M1 criado)
+## Estrutura do código (M1 + M2 criados)
 
 - `src/config` — loader + zod schema/defaults (`ConfigError`); campo `runner`.
 - `src/core/result` — modelo normalizado + `normalize` (determinístico).
@@ -81,29 +82,42 @@ Detalhes completos do contrato: **PRD.md §7**.
   - `factory` — `createRunner(config)` escolhe o adapter por `config.runner`.
   - `vitest` — `VitestAdapter` (`startVitest` + reporter silencioso → `RawRun`).
   - `jest` — `JestAdapter` (`@jest/core` `runCLI` *lazy* → `RawRun`).
-- `src/core/run` — **facade**: `runTests = createRunner(config).run(cwd,config)`;
-  re-exporta `RunnerError`. O resto do CLI nunca sabe qual runner rodou.
+- `src/core/run` — **facade**: `runTests(cwd,config,onEvent?)`; re-exporta
+  `RunnerError`. `onEvent` opcional = streaming p/ TUI; sem ele = silencioso
+  (`check` inalterado). O resto do CLI nunca sabe qual runner rodou.
+- `src/core/events` — `RunEvent` (`test`/`done`) + `pickUnemitted` (dedupe
+  de streaming, runner-agnóstico).
 - `src/core/exit` — exit code do resultado (0/1) + `RUNNER_ERROR_EXIT` (2).
-- `src/renderers/summary` — texto PRD §7 (`detail` list/cause, `maxFailures`).
+- `src/renderers/summary` — texto PRD §7; `failureBlock` **exportado** (reuso
+  na TUI — DRY).
 - `src/renderers/json` — contrato JSON versionado (`schemaVersion`).
-- `src/commands/check` — compõe tudo; veredito→stdout, erros→stderr.
-- `src/cli` — commander (`check`; flags `--cwd/--config/--json`).
+- `src/tui/store` — **store pura** (reducer): decisão #18 (last-failed-wins),
+  `n`/`p`/`esc`/`q`, `done` autoritativo. Sem React. `tui/createStore` —
+  observable fininha p/ `useSyncExternalStore`.
+- `src/renderers/tui` — Ink: `App.tsx` (Overview/FailureView + `useInput`),
+  `index.ts` `renderTui` (só TTY; erro de runner → stderr + exit > 1).
+- `src/commands/check` — compõe; veredito→stdout, erros→stderr.
+- `src/commands/run` — TTY → `renderTui`; headless → delega `runCheck` (DRY).
+- `src/cli` — commander (`run` default + `check`; `--cwd/--config/--json`,
+  `run` tem `--summary`).
 - `test/*.test.ts` unit (inclui `runner-factory`) + `test/e2e.test.ts`;
   `test/fixtures/*` projetos-alvo — `pass/fail/mixed/config-invalid/runner-error`
   (Vitest) + `jest-pass/jest-mixed` (provam contrato idêntico via Jest).
-- `renderers/tui` (Ink) chega no **M2**.
+- M3 (`watch`) e M4 (polimento) ainda não criados.
 
 ## Testes & build
 
 - **Os testes do próprio CLI são escritos em Vitest + TypeScript (ESM)** — o
   mesmo runner que o CLI integra (dogfooding; sem runner extra na stack).
-- **Unit:** módulos puros (normalização, formatters texto/JSON, config+zod,
-  exit codes). Sem spawn.
-- **E2E / contrato:** rodam `test-reporter check` **como processo filho**
-  contra *fixtures* (passa / falha / misto / config inválida / erro de runner;
-  + `jest-pass`/`jest-mixed`) e conferem stdout (snapshot byte-exato), stderr e
-  exit code — incluindo um teste de **paridade**: o veredito é byte-idêntico
-  (módulo duração) seja Vitest ou Jest a executar.
+- **Unit:** módulos puros (normalização, formatters, config+zod, exit codes,
+  **store da TUI** — contadores/decisão #18/nav, **sem render Ink**; dedupe de
+  streaming `pickUnemitted` + `isTerminalState`). Sem spawn.
+- **E2E / contrato:** `check` **e** `run` **como processo filho** contra
+  *fixtures* (passa/falha/misto/config-inválida/runner-error + `jest-*`):
+  stdout byte-exato, stderr, exit code. Inclui **paridade** Vitest↔Jest e
+  **`run` non-TTY ≡ `check`** (mesmos bytes/exit). O render Ink em si **não é
+  testado automaticamente** (a lógica vive na store pura, que é); smoke manual
+  sob pty se precisar ver a TUI.
 - ⚠️ **Nunca** chamar o núcleo de dentro de um teste Vitest — ele inicia um
   runner (`startVitest`/`runCLI`); runner-dentro-de-runner = reentrância.
   Sempre processo filho. (Por isso `runner-factory.test.ts` só **constrói** o

@@ -1,6 +1,7 @@
 import { startVitest } from "vitest/node";
 
 import type { Config } from "../../config/index.js";
+import { type RunEventSink, pickUnemitted } from "../events.js";
 import type { RawRun, RawTest, TestStatus } from "../result.js";
 import { RunnerError, TestRunnerAdapter } from "./adapter.js";
 
@@ -17,19 +18,14 @@ interface VTask {
   result?: { state?: string; duration?: number; errors?: VError[] };
   tasks?: VTask[];
 }
+/** What Vitest hands to `onInit` — only the bit we need (live task state). */
+interface VContext {
+  state: { getFiles: () => unknown[] };
+}
 
-/** No-op reporter: replaces Vitest's default so nothing pollutes stdout. */
-class SilentReporter {
-  onInit(): void {}
-  onPathsCollected(): void {}
-  onCollected(): void {}
-  onTaskUpdate(): void {}
-  onTestRemoved(): void {}
-  onWatcherStart(): void {}
-  onWatcherRerun(): void {}
-  onServerRestart(): void {}
-  onUserConsoleLog(): void {}
-  onFinished(): void {}
+/** A test is "settled" once its state is terminal — never emit it before. */
+export function isTerminalState(s: string | undefined): boolean {
+  return s === "pass" || s === "fail" || s === "skip" || s === "todo";
 }
 
 function mapStatus(task: VTask): TestStatus {
@@ -44,13 +40,16 @@ function walk(
   filepath: string,
   prefix: string[],
   out: RawTest[],
+  settledOnly: boolean,
 ): void {
   if (task.type === "suite") {
     const next = [...prefix, task.name ?? ""];
-    for (const child of task.tasks ?? []) walk(child, filepath, next, out);
+    for (const child of task.tasks ?? [])
+      walk(child, filepath, next, out, settledOnly);
     return;
   }
   if (task.type === "test" || task.type === "custom") {
+    if (settledOnly && !isTerminalState(task.result?.state)) return;
     const status = mapStatus(task);
     const err = task.result?.errors?.[0];
     out.push({
@@ -73,9 +72,10 @@ function walk(
   }
 }
 
-function collectFile(file: VTask, out: RawTest[]): void {
+function collectFile(file: VTask, out: RawTest[], settledOnly: boolean): void {
   const filepath = file.filepath ?? "";
-  for (const child of file.tasks ?? []) walk(child, filepath, [], out);
+  for (const child of file.tasks ?? [])
+    walk(child, filepath, [], out, settledOnly);
 }
 
 function countTests(task: VTask): number {
@@ -92,11 +92,52 @@ function firstErrorMessage(files: VTask[], unhandled: unknown[]): string {
   return u?.message ?? "Vitest failed to run the test suite";
 }
 
+/**
+ * Replaces Vitest's default reporter so nothing pollutes stdout. With no sink
+ * it is a pure no-op (same role as M1's silent reporter); with a sink it
+ * streams every terminal test once, live, as the run progresses.
+ */
+class StreamReporter {
+  private provider?: () => VTask[];
+  private readonly emitted = new Set<string>();
+
+  constructor(private readonly onEvent?: RunEventSink) {}
+
+  onInit(ctx: VContext): void {
+    this.provider = () => ctx.state.getFiles() as unknown as VTask[];
+  }
+  onTaskUpdate(): void {
+    this.flush();
+  }
+  onPathsCollected(): void {}
+  onCollected(): void {}
+  onTestRemoved(): void {}
+  onWatcherStart(): void {}
+  onWatcherRerun(): void {}
+  onServerRestart(): void {}
+  onUserConsoleLog(): void {}
+  onFinished(): void {
+    this.flush();
+  }
+
+  private flush(): void {
+    if (!this.onEvent || !this.provider) return;
+    const tests: RawTest[] = [];
+    for (const f of this.provider()) collectFile(f, tests, true);
+    for (const t of pickUnemitted(tests, this.emitted))
+      this.onEvent({ type: "test", test: t });
+  }
+}
+
 /** Runs the target project's suite with Vitest's Node API (`startVitest`). */
 export class VitestAdapter extends TestRunnerAdapter {
   readonly name = "vitest";
 
-  async run(cwd: string, config: Config): Promise<RawRun> {
+  async run(
+    cwd: string,
+    config: Config,
+    onEvent?: RunEventSink,
+  ): Promise<RawRun> {
     const start = Date.now();
     let vitest: Awaited<ReturnType<typeof startVitest>> | undefined;
     try {
@@ -105,7 +146,7 @@ export class VitestAdapter extends TestRunnerAdapter {
         watch: false,
         run: true,
         include: config.include,
-        reporters: [new SilentReporter()],
+        reporters: [new StreamReporter(onEvent)],
         includeTaskLocation: true,
         silent: true,
         passWithNoTests: true,
@@ -124,7 +165,7 @@ export class VitestAdapter extends TestRunnerAdapter {
       ) as unknown[];
 
       const tests: RawTest[] = [];
-      for (const f of files) collectFile(f, tests);
+      for (const f of files) collectFile(f, tests, false);
 
       const collectionFailed = files.some(
         (f) => f.result?.state === "fail" && countTests(f) === 0,
@@ -133,7 +174,13 @@ export class VitestAdapter extends TestRunnerAdapter {
         throw new RunnerError(firstErrorMessage(files, unhandled));
       }
 
-      return { rootDir: cwd, tests, durationMs: Date.now() - start };
+      const run: RawRun = {
+        rootDir: cwd,
+        tests,
+        durationMs: Date.now() - start,
+      };
+      onEvent?.({ type: "done", run });
+      return run;
     } finally {
       await vitest.close();
     }

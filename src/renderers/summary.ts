@@ -11,7 +11,8 @@ function statusLine(r: RunResult): string {
   return `${icon} · ${r.passed} passed · ${r.failed} failed · ${r.skipped} skipped · ${fmtDuration(r.durationMs)}`;
 }
 
-function failureBlock(f: Failure, detail: "list" | "cause"): string[] {
+/** One failure rendered as lines. Shared by the text verdict and the TUI (DRY). */
+export function failureBlock(f: Failure, detail: "list" | "cause"): string[] {
   const head = `FAIL ${f.file} › ${f.test}`;
   if (detail === "list") return [head];
   const at =

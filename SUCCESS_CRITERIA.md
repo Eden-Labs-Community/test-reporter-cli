@@ -81,24 +81,31 @@ pacote instala e roda fora do repo · PRD/CLAUDE/progress/este doc coerentes.
 
 ## M2 — `test-reporter run` (TUI flagship — RF-09/03/05/01/02)
 
-- [ ] TTY → abre TUI Ink; non-TTY → cai para a saída headless (= `check`).
-- [ ] Resultados **streamam ao vivo**: cada teste aparece e muda de estado
-  (pendente → verde/vermelho) em tempo real conforme o reporter emite;
-  contadores ao vivo (RF-02/RF-09).
-- [ ] Tela de **resumo**: total de suites, passou/falhou/skipped, lista
-  navegável por teclado, duração (RF-05).
-- [ ] **Auto-foco na falha (RF-03):** ao falhar uma suíte, a UI troca para a
-  tela de detalhe dela — testes que falharam, diff de assertiva, stack limpa e
-  code frame (RF-01).
-- [ ] **Decisão #13 do PRD resolvida e implementada** (regra de múltiplas
-  falhas: qual focar / como ciclar).
-- [ ] Navegação fluida: `n`/`p` entre falhas, `Enter` abre item, `Esc`/`q`
-  volta/sai; TUI não trava durante execução.
-- [ ] Estética caprichada só em TTY; degrade limpo em non-TTY/CI; respeita
-  `NO_COLOR`/`--no-color`.
-- [ ] **DRY:** reusa núcleo + modelo do M1; só o renderer `tui` é novo.
-- [ ] Testes (unit, sem render real): estado/seleção/navegação; pelo menos um
-  de "auto-foco em falha" e um de "contadores ao vivo" via eventos simulados.
+- [x] TTY → abre TUI Ink; non-TTY/`--summary`/`--json` → cai para a saída
+  headless (= `check`). *(paridade `run`≡`check` testada em e2e.)*
+- [x] Resultados **streamam ao vivo** (Vitest): teste aparece e muda de estado
+  em tempo real; contadores ao vivo (RF-02/RF-09). *(smoke sob pty comprovou
+  `✓0→✓1` + nome streamando.)* ⚠️ **Jest = batch no `done`** (sem liveness
+  incremental) — débito v1 (→ M4); resultado/contrato final inalterado.
+- [x] **Auto-foco na falha (RF-03):** ao falhar, a UI troca p/ o detalhe
+  (teste, `at arquivo:linha:col`, `Tipo: causa`). *(decisão #18; smoke
+  comprovou o salto ao vivo.)* ⚠️ *diff de assertiva / code-frame* rico =
+  polimento futuro (→ M4); hoje mostra causa+local (= contrato `check`).
+- [x] **Decisão de múltiplas falhas resolvida e implementada** — PRD **#18**
+  (last-failed-wins; `n`/`p` cicla arquivo→nome; `esc` overview).
+- [x] Navegação: `n`/`p` entre falhas, `esc` volta, `q`/Ctrl-C sai; a TUI não
+  trava durante a execução (run async, store reativa). *(nota: abre via `n`,
+  não `Enter` — coerente com a decisão #18.)*
+- [x] Estética só em TTY; degrade limpo em non-TTY/CI; **`NO_COLOR`** honrado
+  (via Ink/chalk). ⚠️ flag **`--no-color`** explícita = M4.
+- [x] **DRY:** reusa núcleo/modelo/`normalize`/`failureBlock` do M1; só
+  store+renderer `tui` são novos; `check` intacto (contrato não regrediu).
+- [x] Testes (unit, sem render real): estado/seleção/navegação; **auto-foco em
+  falha** e **contadores ao vivo** via eventos simulados (`tui-store.test.ts`);
+  dedupe de streaming (`streaming.test.ts`).
+- [ ] **Tela de resumo dedicada** (árvore de suites navegável, `Enter` abre
+  suíte): **parcial** — overview ao vivo (contadores + duração + últimos
+  testes) e navegação de falhas prontos; árvore por suíte = polimento (→ M4).
 
 ## M3 — `test-reporter watch` (RF-04)
 
@@ -120,6 +127,9 @@ pacote instala e roda fora do repo · PRD/CLAUDE/progress/este doc coerentes.
   zod) com defaults documentados.
 - [ ] `ui.theme` (auto/claro/escuro), `NO_COLOR` e `--no-color` respeitados.
 - [ ] `--help`/`--version` completos por comando; mensagens de erro acionáveis.
+- [ ] **Débitos herdados do M2:** streaming **incremental no Jest** (hoje
+  batch); **árvore de suítes navegável** no resumo; **diff/code-frame** rico
+  no detalhe da falha; flag **`--no-color`** explícita.
 - [ ] **Publicável:** `bin` + shebang corretos, `exports`/`files`, build limpo;
   `npm pack` instalável; `npx test-reporter` funciona **fora** do repo.
 - [ ] `README` com uso (incl. **como o Claude deve chamar `check`**) e o

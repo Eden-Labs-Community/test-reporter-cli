@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { Command } from "commander";
 
 import { runCheck } from "./commands/check.js";
+import { runRun } from "./commands/run.js";
 
 const program = new Command();
 
@@ -13,6 +14,32 @@ program
     "Test reporter CLI — `run` (pretty live TUI for devs) and `check` (headless, deterministic verdict for agents/CI).",
   )
   .version("0.1.0");
+
+program
+  .command("run", { isDefault: true })
+  .description(
+    "Flagship: live TUI on a TTY; falls back to the `check` verdict when headless (CI/pipe/--summary/--json).",
+  )
+  .option("--cwd <dir>", "project directory", process.cwd())
+  .option("--config <path>", "path to test-reporter-config.json")
+  .option("--json", "headless: emit the stable, versioned JSON contract")
+  .option("--summary", "force the headless text verdict even on a TTY")
+  .action(
+    async (opts: {
+      cwd: string;
+      config?: string;
+      json?: boolean;
+      summary?: boolean;
+    }) => {
+      const code = await runRun({
+        cwd: resolve(opts.cwd),
+        configPath: opts.config,
+        json: Boolean(opts.json),
+        summary: Boolean(opts.summary),
+      });
+      process.exit(code);
+    },
+  );
 
 program
   .command("check")

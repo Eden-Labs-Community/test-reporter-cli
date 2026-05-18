@@ -1,4 +1,5 @@
 import type { Config } from "../../config/index.js";
+import type { RunEventSink } from "../events.js";
 import type { RawRun, RawTest, RawTestError, TestStatus } from "../result.js";
 import { RunnerError, TestRunnerAdapter } from "./adapter.js";
 
@@ -76,7 +77,11 @@ function firstRunnerError(files: JTestFile[]): string {
 export class JestAdapter extends TestRunnerAdapter {
   readonly name = "jest";
 
-  async run(cwd: string, config: Config): Promise<RawRun> {
+  async run(
+    cwd: string,
+    config: Config,
+    onEvent?: RunEventSink,
+  ): Promise<RawRun> {
     const start = Date.now();
 
     let runCLI: JestCoreModule["runCLI"];
@@ -139,6 +144,13 @@ export class JestAdapter extends TestRunnerAdapter {
       }
     }
 
-    return { rootDir: cwd, tests, durationMs: Date.now() - start };
+    const run: RawRun = { rootDir: cwd, tests, durationMs: Date.now() - start };
+    if (onEvent) {
+      // v1: Jest streams as a single batch at completion (no incremental
+      // liveness yet — documented debt). Final result/contract is unaffected.
+      for (const test of tests) onEvent({ type: "test", test });
+      onEvent({ type: "done", run });
+    }
+    return run;
   }
 }

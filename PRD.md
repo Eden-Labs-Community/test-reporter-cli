@@ -1,7 +1,7 @@
 # PRD — test-reporter-cli
 
-> Documento vivo (v0.8). 🟢 decidido · 🟡 em aberto · 🔵 proposta minha sujeita a validação.
-> **M1 implementado e verde; runner agora plugável (adapters Vitest e Jest).**
+> Documento vivo (v0.9). 🟢 decidido · 🟡 em aberto · 🔵 proposta minha sujeita a validação.
+> **M1 + M2 implementados e verdes; runner plugável (Vitest/Jest); TUI `run` ao vivo.**
 
 ## 1. Visão geral
 
@@ -121,9 +121,11 @@ adapter, sem mudar schema/contrato.)
 
 - **`test-reporter check`** — entrypoint do agente/CI: headless, varre tudo 1x,
   veredito explícito (seção 7), `--json`, exit code (seção 5). **(M1)**
-- **`test-reporter run`** — comando principal. TTY → TUI caprichada ao vivo
-  (RF-09): suites/testes streamando, verdes ao vivo, contadores ao vivo,
-  auto-foco na suíte que falha (RF-03). `--summary`/`--json` força headless. **(M2)**
+- **`test-reporter run`** — comando principal (default). TTY → TUI ao vivo
+  (RF-09): testes streamando, contadores ao vivo, **auto-foco na falha no
+  instante em que acontece** (RF-03, decisão #18); `n`/`p` cicla falhas
+  (ordem arquivo→nome), `esc` volta ao overview, `q` sai. Non-TTY / CI /
+  `--summary` / `--json` → **cai exatamente no contrato do `check`**. **(M2 ✔)**
 - `test-reporter watch` — modo watch (RF-04), TUI ao vivo. **(M3)**
 - `test-reporter init` — gera `test-reporter-config.json`. **(M4)**
 - Flags globais: `--config`, `--filter`, `--mode standard|watch`, `--json`.
@@ -149,6 +151,13 @@ adapter, sem mudar schema/contrato.)
     opcional** (import *lazy*; `runner:"jest"` sem Jest instalado → `RunnerError`,
     exit > 1, sem falso PASS); invariante "sem parsing de stdout" generalizado
     para "via API estruturada do runner".
+18. **RF-03 — regra de múltiplas falhas (2026-05-18, escolha do usuário).**
+    A TUI usa **foco na falha no instante em que ela acontece**
+    (*last-failed-wins*): a próxima falha rouba o foco. `n`/`p` cicla as
+    falhas na ordem determinística (arquivo→nome, = ordem do `check`); `esc`
+    volta ao overview ao vivo; `q` sai. *Motivo:* máximo "ao vivo"/drama p/ o
+    dev. *Implicação:* lógica de seleção isolada em store **pura** (sem render),
+    coberta por testes; o renderer Ink só desenha o estado.
 
 **Propostas a confirmar 🔵**
 
@@ -156,7 +165,7 @@ adapter, sem mudar schema/contrato.)
 
 **Em aberto 🟡 (não bloqueiam M1)**
 
-13. RF-03: regra quando múltiplas suites falham (decidir em M2).
+13. ~~RF-03: regra de múltiplas falhas~~ → **resolvida em #18**.
 14. RF-04: em watch, rodar só o arquivo salvo ou rodar tudo e focar (M3).
 15. Monorepo / múltiplos projetos? (provável fora do v1)
 16. Coverage no escopo? (provável fora do v1)
@@ -170,6 +179,7 @@ Coverage, monorepo multi-projeto, dashboard web, histórico entre rodadas.
 - **M1 (núcleo p/ o agente) — implementado e verde:** `test-reporter check` +
   contrato (seção 7) + config (RF-07) + RF-01/02 + **runner plugável (adapters
   Vitest e Jest)**. Testável pelo Claude.
-- **M2 (UX flagship):** `test-reporter run` TUI caprichada ao vivo (RF-09/03/05).
+- **M2 (UX flagship) — implementado e verde:** `test-reporter run` TUI ao vivo
+  (RF-09/03/05, decisão #18); non-TTY → contrato do `check` (paridade testada).
 - **M3:** `watch` (RF-04).
 - **M4:** polimento (`init`, temas, distribuição npm).

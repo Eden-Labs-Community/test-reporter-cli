@@ -26,32 +26,36 @@ Esses quatro devem sempre refletir a realidade atual.
 
 ## O que é o projeto
 
-`test-reporter-cli`: CLI de relatório de testes com **três comandos e dois
-públicos distintos**:
+`test-reporter-cli`: CLI de relatório de testes — **`run`/`watch`/`check`**
+(+ `init`) e **dois públicos distintos** (dev na TUI · Claude no `check`).
+**M1–M4 verdes (82 testes); pacote publicável.**
 
 - **`test-reporter run`** — TUI (Ink) bonita e ao vivo, para devs; comando
   default. Foca a falha no instante em que acontece (decisão #18). Non-TTY/CI/
   `--summary`/`--json` → cai no contrato do `check`. UX flagship. **(M2 ✔)**
-- **`test-reporter watch`** — mesma TUI, re-rodando ao salvar via o **watcher
-  nativo do Vitest** (decisão #19: testes relacionados pelo grafo); a UI foca
-  a suíte do **último arquivo salvo** (RF-04); `a`=tudo `f`=só falhas. Watch é
-  **Vitest-only no v1** (Jest = débito M4). Non-TTY → contrato do `check`.
-  **(M3 ✔)**
+- **`test-reporter watch`** — mesma TUI, re-rodando ao salvar. **Vitest:**
+  watcher nativo (testes relacionados, #19). **Jest:** `fs.watch` + re-run da
+  suíte reusando o `run` 1-shot (#21). UI foca a suíte do **último salvo**
+  (RF-04); `a`=tudo `f`=só falhas. Non-TTY → contrato do `check`. **(M3+M4 ✔)**
 - **`test-reporter check`** — headless, determinístico, com **contrato de saída
   estável**. **Consumidor primário = o Claude usando como ferramenta** num loop
   agêntico (rodar → ler veredito → corrigir). **(M1 ✔)**
+- **`test-reporter init`** — scaffold do config (safe-by-default, #20). **(M4)**
+- **TUI (M4):** tema `auto/light/dark` + `--no-color`/`NO_COLOR`; tecla `s` =
+  árvore de suítes navegável; detalhe da falha com diff + code-frame. Tudo
+  **TUI-only** — `check` segue ANSI-free e byte-idêntico.
 
 ## Stack
 
-TypeScript · **ESM** · **Node ≥ 20** · **Ink** (TUI, M2/M3) · **commander**
-(args) · **zod** (config). **Runner plugável** (não mais travado em Vitest):
-classe abstrata `TestRunnerAdapter` + factory pelo campo `runner` do config.
-Adapters no v1: **Vitest** (`startVitest` + reporter silencioso, streaming p/
-store/TUI; `watch:true` = **watcher nativo**, M3) e **Jest** (`@jest/core`
-`runCLI`, import *lazy* / **peer opcional**; sem watch no v1 → `RunnerError`).
-Resultados **sempre via API estruturada do runner — nunca parsear stdout** do
-relatório humano. Adicionar runner = **só um novo adapter** (núcleo/contrato
-intactos).
+TypeScript · **ESM** · **Node ≥ 20** · **Ink** (TUI) · **commander** (args) ·
+**zod** (config). **Runner plugável**: classe abstrata `TestRunnerAdapter` +
+factory pelo campo `runner` do config. Adapters: **Vitest** (`startVitest` +
+reporter silencioso, streaming ao vivo; `watch:true` = **watcher nativo**) e
+**Jest** (`@jest/core` `runCLI`, import *lazy* / **peer opcional**; streaming
+**incremental** via reporter `.cjs` brid-eado por `globalThis`; **watch via
+`fs.watch`** re-rodando o `run` 1-shot, #21). Resultados **sempre via API
+estruturada do runner — nunca parsear stdout** do relatório humano. Adicionar
+runner = **só um novo adapter** (núcleo/contrato intactos).
 
 ## Princípios de desenvolvimento (obrigatórios)
 
@@ -63,8 +67,8 @@ intactos).
   Normalização de resultados, formatação (texto/JSON), caminhos relativos e
   carregamento de config vivem cada um em **um único módulo reutilizável**; os
   comandos apenas **compõem**. Duplicação aparente ⇒ extrair função/módulo.
-- Consequência: `check` e os futuros `run`/`watch` compartilham o mesmo núcleo
-  e o mesmo modelo de resultados — muda o *renderer*, nunca os dados.
+- Consequência: `check`, `run` e `watch` compartilham o mesmo núcleo e o
+  mesmo modelo de resultados — muda o *renderer*, nunca os dados.
 
 ## Invariantes que NÃO podem quebrar (contrato do `check`)
 
@@ -76,13 +80,23 @@ intactos).
 - **Exit code:** `0` tudo passou · `1` algum teste falhou · `>1` erro de
   runner/config.
 - **`--json` versionado** (`schemaVersion`).
+- **M4 não regride o contrato:** `expected`/`actual` (modelo) e o code-frame
+  são **só da TUI**; `summary`/`json` os ignoram → bytes inalterados. Jest
+  streaming só liga com sink (TUI); `check` não passa sink. Provado pelos
+  e2e byte-exatos verdes.
 
 Detalhes completos do contrato: **PRD.md §7**.
 
-## Estrutura do código (M1 + M2 + M3 criados)
+## Estrutura do código (M1–M4)
 
 - `src/config` — loader + zod schema/defaults (`ConfigError`); campo `runner`.
+  `defaultConfig()`/`serializeDefaultConfig()` = **fonte única** dos defaults
+  (derivada do schema); o caminho "sem arquivo" do `loadConfig` e o `init`
+  consomem essa fonte (DRY — nunca divergem).
 - `src/core/result` — modelo normalizado + `normalize` (determinístico).
+  `toPosixRelative` **exportado** (reuso na store/TUI — DRY). `Failure` tem
+  `expected?`/`actual?` **opcionais** (TUI-only; renderers do contrato os
+  ignoram → bytes inalterados; sem I/O em `normalize`).
 - `src/core/runner/` — abstração do runner (único lugar que conhece Vitest/Jest):
   - `adapter` — classe abstrata `TestRunnerAdapter` (`run` + `watch`) +
     `RunnerError` + `WatchHandle` (`triggerAll`/`triggerFailed`/`close`).
@@ -90,8 +104,17 @@ Detalhes completos do contrato: **PRD.md §7**.
   - `vitest` — `VitestAdapter` (`startVitest` → `RawRun`; `watch:true` =
     watcher nativo, emite `rerun`/`test`/`done` por ciclo). Helpers DRY
     `collectAll`/`collectionError` (compartilhados por `run` 1-shot + watch).
-  - `jest` — `JestAdapter` (`@jest/core` `runCLI` *lazy* → `RawRun`); `watch`
-    lança `RunnerError` (Vitest-only no v1; débito M4).
+  - `jest` — `JestAdapter` (`@jest/core` `runCLI` *lazy* → `RawRun`).
+    **Streaming incremental:** com sink, passa `reporters:[[REPORTER_PATH,{}]]`
+    (`jest-stream-reporter.cjs`) + slot `globalThis` (mesmo processo,
+    `runInBand`); `toRawTest` é o **único mapeador** (DRY batch+stream);
+    reconcilia via `pickUnemitted`; `done` final = agregado autoritativo
+    (sem sink em `check` → caminho antigo, contrato intacto). **`watch`:**
+    `fs.watch` (recursivo; fallback Linux) debounced re-roda o `run` 1-shot;
+    `ignoredWatchPath` **puro/exportado** (testado); loop não unit-testável.
+  - `jest-stream-reporter.cjs` — reporter CommonJS (Jest `require`-eia por
+    caminho); só faz bridge do test-case p/ o slot `globalThis`. Copiado p/
+    `dist/` por `scripts/copy-assets.mjs` no build (tsc não copia non-TS).
 - `src/core/run` — **facade**: `runTests(cwd,config,onEvent?)` +
   `watchTests(cwd,config,onEvent)`; re-exporta `RunnerError` e o tipo
   `WatchHandle`. `onEvent` opcional no `run` = streaming p/ TUI; sem ele =
@@ -103,26 +126,40 @@ Detalhes completos do contrato: **PRD.md §7**.
   na TUI — DRY).
 - `src/renderers/json` — contrato JSON versionado (`schemaVersion`).
 - `src/tui/store` — **store pura** (reducer): decisão #18 (last-failed-wins),
-  `n`/`p`/`esc`/`q`, `done` autoritativo; **M3**: `rerun` (zera ciclo + grava
-  `watchTrigger` p/ RF-04), teclas `a`/`f` → `command` (seq monotônica que a
-  borda consome — mesma disciplina do `exited`). Sem React. `tui/createStore`
-  — observable fininha p/ `useSyncExternalStore`.
-- `src/renderers/tui` — Ink: `App.tsx` (Overview/FailureView + `useInput`;
-  prop `watch` → cabeçalho `↻ saved:` + teclas `a`/`f`); `index.ts`
-  `renderTui` (run, 1-shot) e **`renderWatchTui`** (watch: dirige o
-  `WatchHandle` pela `command` seq da store; `q`/Ctrl-C → `close()` sem
-  watcher vazado). Só TTY; erro de runner → stderr + exit > 1.
+  `n`/`p`/`esc`/`q`, `done` autoritativo; `rerun` (zera ciclo + `watchTrigger`
+  RF-04), `a`/`f` → `command` (seq monotônica). **M4:** view `suites` +
+  `buildSuiteTree` (selector puro, ordenado por arquivo→suíte) + `treeFocus`;
+  `s` alterna, `up`/`down` navegam (clamp), `enter` salta p/ a 1ª falha da
+  suíte. Sem React. `tui/createStore` — observable p/ `useSyncExternalStore`.
+- `src/renderers/tui` — Ink: `App.tsx` (Overview/FailureView/**SuitesView** +
+  `useInput`; prop `watch`; prop `palette`); `theme.ts` (`resolvePalette`
+  **puro** — `auto/light/dark`, `--no-color`/`NO_COLOR` → mono); `codeframe.ts`
+  (`codeFrame` **puro/best-effort**, 1 read sync, nunca lança); `index.ts`
+  `renderTui`/`renderWatchTui` (resolvem palette via `config.ui.theme`+
+  `--no-color`; `close()` sem watcher vazado). Só TTY; erro → stderr + exit>1.
 - `src/commands/check` — compõe; veredito→stdout, erros→stderr.
 - `src/commands/run` — TTY → `renderTui`; headless → delega `runCheck` (DRY).
 - `src/commands/watch` — TTY → `renderWatchTui`; headless → `runCheck`
   (1 execução = contrato do `check`, DRY).
-- `src/cli` — commander (`run` default + `watch` + `check`;
-  `--cwd/--config/--json`, `run`/`watch` têm `--summary`).
-- `test/*.test.ts` unit (inclui `runner-factory` — também afirma o guard
-  `jest.watch`→`RunnerError`, sem nunca chamar `.run()`/`.watch()` real) +
-  `test/e2e.test.ts`; `test/fixtures/*` — `pass/fail/mixed/config-invalid/
-  runner-error` (Vitest) + `jest-pass/jest-mixed` (contrato idêntico via Jest).
-- M4 (polimento) ainda não criado.
+- `src/commands/init` — `runInit` (síncrono): escreve `serializeDefaultConfig()`
+  no cwd; **safe-by-default** — recusa clobber sem `--force` (exit 1 + stderr
+  acionável); stdout = confirmação humana (fora do contrato do `check`).
+- `src/index.ts` — **API programática** (`main`/`exports`): núcleo headless
+  (`runCheck`/`loadConfig`/`normalize`/`formatText`/`formatJson`/tipos…). TUI
+  é CLI-only, fora da API.
+- `src/cli` — commander (`run` default + `watch` + `check` + `init`;
+  `--cwd/--config/--json`, `run`/`watch`: `--summary`+`--no-color`, `init`:
+  `--force`). Versão = **fonte única** (`createRequire('../package.json')`).
+  Guarda pré-parse: 1º token non-option fora de `{run,watch,check,init}` →
+  "unknown command" + exit 2 (senão o default `run` engoliria o typo).
+- `scripts/copy-assets.mjs` — copia o `.cjs` p/ `dist/` no `build`.
+- `test/*.test.ts` unit (`runner-factory` = só seleção, **nunca** `.run()`/
+  `.watch()`; `theme`, `codeframe`, `jest-watch`=`ignoredWatchPath` puro) +
+  `e2e.test.ts`; `test/fixtures/*` (Vitest + `jest-*` paridade).
+- `test/init.test.ts`/`cli.test.ts` — e2e do `init` e de help/version/unknown.
+- **M1–M4 completos.** Loops watch (Vitest+Ink, Jest+`fs.watch`) e streaming
+  incremental do Jest **não são unit-testáveis** (reentrância) → smoke
+  event-level num dir real (streaming antes do `done` + flip ao salvar).
 
 ## Testes & build
 
@@ -136,13 +173,17 @@ Detalhes completos do contrato: **PRD.md §7**.
   stdout byte-exato, stderr, exit code. Inclui **paridade** Vitest↔Jest e
   **`run` non-TTY ≡ `check`** (mesmos bytes/exit). O render Ink em si **não é
   testado automaticamente** (a lógica vive na store pura, que é); smoke manual
-  sob pty se precisar ver a TUI.
+  sob pty se precisar ver a TUI. **`init`** roda como processo filho num
+  `tmpdir` (não inicia runner → seguro; não usa fixtures).
 - ⚠️ **Nunca** chamar o núcleo de dentro de um teste Vitest — ele inicia um
   runner (`startVitest`/`runCLI`); runner-dentro-de-runner = reentrância.
   Sempre processo filho. (Por isso `runner-factory.test.ts` só **constrói** o
   adapter, nunca chama `.run()`.)
-- Comandos: `npm run build` (tsc) · `npm test` (vitest run) · `npm run lint`
-  (= `tsc --noEmit`). Não precisa buildar p/ testar — e2e roda via `tsx`.
+- Comandos: `npm run build` (**tsc + `copy-assets.mjs`** copia o `.cjs` p/
+  `dist/`) · `npm test` (vitest run, **82 verdes**) · `npm run lint`
+  (= `tsc --noEmit`). Não precisa buildar p/ testar — e2e roda via `tsx`
+  (o `.cjs` resolve em `src/` via `import.meta.url`). Publicável verificado:
+  `npm pack` instala e roda fora do repo (`bin`/shebang/`exports` OK).
 - Determinismo: a duração (`<n>s`) é runtime; os testes e2e a **normalizam**
   antes de comparar bytes. O contrato é determinístico módulo duração.
 - `line/col` = local da **definição do teste** (Vitest `includeTaskLocation`,

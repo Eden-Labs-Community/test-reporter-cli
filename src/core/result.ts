@@ -9,6 +9,9 @@ export interface RawTestError {
   line?: number;
   col?: number;
   file?: string;
+  /** Assertion diff sides (TUI detail only — never in the `check` contract). */
+  expected?: string;
+  actual?: string;
 }
 export interface RawTest {
   file: string;
@@ -33,6 +36,14 @@ export interface Failure {
   col?: number;
   errorType: string;
   message: string;
+  /**
+   * Optional assertion diff sides. The text/JSON `check` renderers IGNORE
+   * these (contract stays byte-identical, modulo duration); only the live
+   * TUI's failure detail renders them. Runner-agnostic — Vitest populates
+   * them; Jest leaves them undefined (no human-message parsing).
+   */
+  expected?: string;
+  actual?: string;
 }
 
 /** Normalized run result. Single model shared by every renderer (DRY). */
@@ -46,7 +57,8 @@ export interface RunResult {
   failures: Failure[];
 }
 
-function toPosixRelative(rootDir: string, file: string): string {
+/** Root-relative POSIX path — the canonical file form every renderer uses. */
+export function toPosixRelative(rootDir: string, file: string): string {
   return relative(rootDir, file).split("\\").join("/");
 }
 
@@ -80,6 +92,10 @@ export function normalize(raw: RawRun): RunResult {
         col: err.col,
         errorType: err.name ?? "Error",
         message: firstLine(err.message),
+        // Carried for the TUI only (no I/O here — deterministic). Contract
+        // renderers never read these, so `check` bytes are unchanged.
+        ...(err.expected !== undefined ? { expected: err.expected } : {}),
+        ...(err.actual !== undefined ? { actual: err.actual } : {}),
       });
     }
   }

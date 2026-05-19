@@ -1,7 +1,9 @@
 # PRD — test-reporter-cli
 
-> Documento vivo (v1.0). 🟢 decidido · 🟡 em aberto · 🔵 proposta minha sujeita a validação.
-> **M1 + M2 + M3 implementados e verdes; runner plugável (Vitest/Jest); TUI `run` ao vivo + `watch` (watcher nativo do Vitest, foco no arquivo salvo).**
+> Documento vivo (v1.2). 🟢 decidido · 🟡 em aberto · 🔵 proposta minha sujeita a validação.
+> **M1–M4 implementados e verdes (82 testes); pacote publicável.** Runner
+> plugável (Vitest/Jest, ambos com watch); TUI `run`/`watch` ao vivo (tema,
+> árvore de suítes, diff/code-frame); `check` headless determinístico; `init`.
 
 ## 1. Visão geral
 
@@ -55,18 +57,23 @@ determinístico e acionável.
 
 ## 6. Arquitetura
 
-- **Linguagem:** 🟢 TypeScript.  **Módulos:** 🔵 **ESM** (Vitest 3 e Ink são
-  ESM-first).  **Node:** 🔵 **≥ 20 LTS**.
+- **Linguagem:** 🟢 TypeScript.  **Módulos:** 🟢 **ESM**.  **Node:** 🟢 **≥ 20
+  LTS**. *(propostas 🔵 confirmadas — implementadas e publicáveis.)*
 - **Runner:** 🟢 **plugável** — classe abstrata `TestRunnerAdapter` + factory
   escolhida pelo campo `runner` do config. **Adapter Vitest** (`startVitest` +
   reporter silencioso, streaming p/ store/TUI) **e adapter Jest** (`@jest/core`
   `runCLI`, import *lazy* / peer opcional) no v1. O adapter só produz `RawRun`;
   normalize/renderers/exit são **runner-agnósticos** (novo runner = novo adapter).
-- **UI:** 🟢 Ink.  **Watch:** 🟢 **watcher nativo do Vitest** (decisão #19):
-  re-roda os testes relacionados ao arquivo salvo pelo grafo de módulos
-  (rápido + pega quebra cross-file); a TUI foca a suíte do último salvo
-  (RF-04). Watch é **Vitest-only no v1** (Jest = débito M4, ver decisão #17).
-- **Args:** 🔵 `commander`.  **Config:** 🔵 `zod`.
+- **UI:** 🟢 Ink (tema `auto/light/dark` + `--no-color`/`NO_COLOR`; árvore de
+  suítes navegável; detalhe da falha com diff + code-frame — TUI-only, contrato
+  do `check` intacto).  **Watch:** 🟢 **Vitest = watcher nativo** (decisão #19,
+  testes relacionados pelo grafo); **Jest = `fs.watch` + re-run da suíte
+  inteira** reusando o `run` 1-shot (decisão #21). A TUI foca a suíte do
+  último salvo (RF-04) em ambos.
+- **Args:** 🟢 `commander`.  **Config:** 🟢 `zod`. **Streaming:** Vitest ao
+  vivo via reporter; **Jest incremental** via reporter `.cjs` (bridge
+  in-process por `globalThis`; decisão #21) — `done` final sempre do resultado
+  agregado autoritativo, contrato inalterado.
 - **Camadas:** núcleo (adapter do runner + store) compartilhado; *renderers* plugáveis:
   `tui` (Ink, ao vivo) e `summary` (texto estável / `--json`).
 
@@ -120,7 +127,7 @@ Em sucesso: `"status": "pass"`, `"ok": true`, `"failed": 0`, `"failures": []`.
 (`runner`: `"vitest"` | `"jest"`, default `"vitest"`. Novos runners = novo
 adapter, sem mudar schema/contrato.)
 
-## 9. Comandos / UX 🔵
+## 9. Comandos / UX 🟢
 
 - **`test-reporter check`** — entrypoint do agente/CI: headless, varre tudo 1x,
   veredito explícito (seção 7), `--json`, exit code (seção 5). **(M1)**
@@ -129,14 +136,22 @@ adapter, sem mudar schema/contrato.)
   instante em que acontece** (RF-03, decisão #18); `n`/`p` cicla falhas
   (ordem arquivo→nome), `esc` volta ao overview, `q` sai. Non-TTY / CI /
   `--summary` / `--json` → **cai exatamente no contrato do `check`**. **(M2 ✔)**
-- **`test-reporter watch`** — modo watch (RF-04), TUI ao vivo. Watcher nativo
-  do Vitest re-roda os testes relacionados ao salvar; cada ciclo zera os
-  contadores e a UI foca a suíte do **último arquivo salvo** (cabeçalho
-  `↻ saved: …`); `a` re-roda tudo, `f` só as falhas, `n`/`p`/`esc` como no
-  `run` (decisão #18), `q`/Ctrl-C encerra limpo (sem watcher vazado).
+- **`test-reporter watch`** — modo watch (RF-04), TUI ao vivo. **Vitest:**
+  watcher nativo (testes relacionados pelo grafo). **Jest:** `fs.watch` +
+  re-run da suíte (decisão #21). Cada ciclo zera os contadores e a UI foca a
+  suíte do **último arquivo salvo** (`↻ saved: …`); `a` re-roda tudo, `f` só
+  as falhas, `n`/`p`/`esc`/`s` como no `run`, `q`/Ctrl-C encerra limpo.
   Non-TTY / CI / `--summary` / `--json` → 1 execução = contrato do `check`.
-  **(M3 ✔)**
-- `test-reporter init` — gera `test-reporter-config.json`. **(M4)**
+  **(M3 ✔ · Jest watch M4 ✔)**
+- **Teclas/UX comuns (M4):** `s` abre a **árvore de suítes** navegável
+  (`↑`/`↓`, `enter` abre suíte com falha); o detalhe da falha mostra **diff +
+  code-frame** quando o runner fornece; `--no-color`/`NO_COLOR` e
+  `ui.theme` (`auto/light/dark`) — tudo **TUI-only**, o contrato do `check`
+  segue ANSI-free e byte-idêntico.
+- **`test-reporter init`** — gera `test-reporter-config.json` com os defaults
+  documentados (§8), schema-válido. **Safe-by-default**: recusa sobrescrever
+  um arquivo existente sem `--force` (exit 1 + stderr acionável); stdout =
+  confirmação para humano (não é o contrato do `check`). **(M4 ✔)**
 - Flags globais: `--config`, `--filter`, `--mode standard|watch`, `--json`.
 
 ## 10. Decisões
@@ -179,22 +194,54 @@ adapter, sem mudar schema/contrato.)
     débito M4, decisão #17); seam `TestRunnerAdapter.watch` → `WatchHandle`
     (`triggerAll`/`triggerFailed`/`close`); lógica de ciclo isolada na store
     **pura** (testada); o loop watch+Ink é verificado por pty-smoke.
+20. **`init` safe-by-default (2026-05-18, M4).** `test-reporter init` **não
+    sobrescreve** um `test-reporter-config.json` existente: sem `--force` →
+    recusa com exit 1 + stderr acionável (config do usuário nunca é destruída
+    silenciosamente); `--force` regrava os defaults. *Motivo:* convenção segura
+    de CLI (não-destrutiva por padrão); o conteúdo escrito é
+    `serializeDefaultConfig()` — **fonte única** derivada do zod, então o
+    arquivo gerado **sempre passa no schema** e nunca diverge do caminho "sem
+    config" do `loadConfig`. *Implicação:* `init` é humano (stdout =
+    confirmação), fora do contrato determinístico do `check`.
+21. **Watch + streaming do Jest (2026-05-18, M4) — fecha o débito da #17.**
+    (a) **Streaming incremental do Jest:** reporter CommonJS
+    (`jest-stream-reporter.cjs`) passado ao `runCLI` por caminho absoluto;
+    como roda no mesmo processo (`runInBand`), faz bridge de cada test-case
+    via um slot em `globalThis` que o `JestAdapter` seta antes e limpa depois.
+    O `done` final continua vindo do **resultado agregado autoritativo** →
+    contrato do `check` byte-inalterado (sink ausente em `check` = caminho
+    antigo intacto; reconciliação por `pickUnemitted`). (b) **Jest watch:**
+    Jest não tem API de watcher nativa estável como o Vitest, então dirigimos
+    nós: `fs.watch` (recursivo; *fallback* não-recursivo no Linux) debounced
+    re-roda **a suíte inteira** via o `run` 1-shot (DRY — mesmo streaming,
+    mesmo veredito). Mais grosso que o grafo do Vitest, porém confiável e
+    determinístico; runs não se sobrepõem; `close()` sem vazamento. *Motivo:*
+    "habilita watch p/ Jest" sem acoplar internals frágeis do Jest.
+    *Implicação:* watch deixa de ser Vitest-only; o loop não é unit-testável
+    (reentrância) → verificado por **smoke event-level** num dir real
+    (streaming antes do `done` + flip de veredito ao salvar).
 
-**Propostas a confirmar 🔵**
+**Propostas — confirmadas 🟢 (implementadas)**
 
-- ESM + Node ≥ 20 LTS; `commander` p/ args; `zod` p/ config.
+- ESM + Node ≥ 20 LTS; `commander` p/ args; `zod` p/ config. *(pacote
+  publicável: `npm pack` instala e roda fora do repo — verificado.)*
 
-**Em aberto 🟡 (não bloqueiam M1)**
+**Em aberto — resolvidas 🟢**
 
 13. ~~RF-03: regra de múltiplas falhas~~ → **resolvida em #18**.
-14. ~~RF-04: em watch, rodar só o arquivo salvo ou rodar tudo e focar~~ →
-    **resolvida em #19** (watcher nativo do Vitest = testes relacionados).
-15. Monorepo / múltiplos projetos? (provável fora do v1)
-16. Coverage no escopo? (provável fora do v1)
+14. ~~RF-04: watch~~ → **resolvida em #19/#21** (Vitest grafo nativo; Jest
+    `fs.watch` + re-run da suíte).
+15. **Monorepo / múltiplos projetos → FORA do v1** (decidido M4). Um projeto/
+    `cwd` por execução; multi-projeto = pós-v1 (sem mudança de núcleo/contrato
+    prevista — provável orquestração externa).
+16. **Coverage → FORA do v1** (decidido M4). O produto é veredito + UX ao vivo;
+    coverage é responsabilidade do runner. Reavaliar pós-v1 se houver demanda.
 
-## 11. Fora de escopo (v1) 🔵
+## 11. Fora de escopo (v1) 🟢
 
-Coverage, monorepo multi-projeto, dashboard web, histórico entre rodadas.
+Coverage (#16), monorepo multi-projeto (#15), dashboard web, histórico entre
+rodadas — **decididos fora do v1** (ver §10 #15/#16). Sem mudança de
+núcleo/contrato prevista para nenhum deles.
 
 ## 12. Roadmap
 
@@ -206,7 +253,13 @@ Coverage, monorepo multi-projeto, dashboard web, histórico entre rodadas.
 - **M3 (watch) — implementado e verde:** `test-reporter watch` TUI ao vivo
   com watcher **nativo do Vitest** (decisão #19/#14: testes relacionados +
   foco no último salvo, RF-04); non-TTY → contrato do `check` (paridade
-  testada). Watch é Vitest-only no v1 (Jest → débito M4, decisão #17).
-- **M4:** polimento (`init`, temas, distribuição npm) + débitos herdados
-  (streaming incremental no Jest, árvore de suítes, diff/code-frame,
-  `--no-color`).
+  testada).
+- **M4 (polimento & release) — implementado e verde (82 testes):** `init`
+  (safe-by-default, #20); `ui.theme` + `--no-color`/`NO_COLOR`; `--help`/
+  `--version` por comando (+ guarda de comando desconhecido; versão = fonte
+  única do `package.json`); **streaming incremental no Jest + Jest watch**
+  (#21); árvore de suítes navegável (`s`); diff/code-frame no detalhe da
+  falha; **pacote publicável** (`src/index.ts` como API; `bin`/shebang/
+  `exports`/`files`; `npm pack` instala e roda fora do repo — verificado);
+  README (incl. como o Claude chama `check`); decisões 🟡 #15/#16 resolvidas
+  (fora do v1). Contrato do `check` **byte-inalterado** em todo o M4.

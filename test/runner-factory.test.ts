@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { loadConfig } from "../src/config/index.js";
-import { RunnerError, TestRunnerAdapter } from "../src/core/runner/adapter.js";
+import { TestRunnerAdapter } from "../src/core/runner/adapter.js";
 import { createRunner } from "../src/core/runner/factory.js";
 
 // No adapter is ever .run() here: constructing/selecting must not boot any
@@ -24,11 +24,8 @@ describe("createRunner", () => {
     expect(a.name).toBe("jest");
   });
 
-  // Safe to call: the Jest guard rejects before any runCLI spawn (no
-  // runner-in-runner). Watch is Vitest-only in v1 (Jest incremental
-  // streaming is the tracked M4 debt) — must fail loud, never a false PASS.
-  it("jest adapter refuses watch with a RunnerError (Vitest-only in v1)", async () => {
-    const a = createRunner({ ...baseCfg, runner: "jest" });
-    await expect(a.watch(".", baseCfg, () => {})).rejects.toThrow(RunnerError);
-  });
+  // M4 (decision #21): Jest now supports watch (fs.watch-driven full re-run).
+  // We can't call .watch()/.run() here — that boots a runner inside Vitest
+  // (reentrancy; see CLAUDE.md). Selection-only above; the pure watch ignore
+  // predicate is covered in jest-watch.test.ts; the loop by event-level smoke.
 });

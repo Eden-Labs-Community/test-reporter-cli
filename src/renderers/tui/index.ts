@@ -11,6 +11,13 @@ import {
 } from "../../core/run.js";
 import { createStore } from "../../tui/createStore.js";
 import { App } from "./App.js";
+import { resolvePalette } from "./theme.js";
+
+/** Color/theme options threaded from the CLI into the live TUI. */
+export interface TuiOptions {
+  /** Explicit `--no-color`; `NO_COLOR` env is also honored downstream. */
+  noColor?: boolean;
+}
 
 /**
  * Render the live TUI for `run` (TTY only). Streams runner events into the
@@ -18,9 +25,17 @@ import { App } from "./App.js";
  * Returns the process exit code; a runner/config failure → stderr + exit > 1
  * (same contract as `check`, never a false PASS).
  */
-export async function renderTui(cwd: string, config: Config): Promise<number> {
+export async function renderTui(
+  cwd: string,
+  config: Config,
+  opts: TuiOptions = {},
+): Promise<number> {
   const store = createStore(cwd);
-  const ink = render(createElement(App, { store }));
+  const palette = resolvePalette({
+    theme: config.ui.theme,
+    noColor: opts.noColor,
+  });
+  const ink = render(createElement(App, { store, palette }));
 
   let fatal: Error | undefined;
   const runP = runTests(cwd, config, (e) => store.dispatch(e)).catch(
@@ -51,9 +66,14 @@ export async function renderTui(cwd: string, config: Config): Promise<number> {
 export async function renderWatchTui(
   cwd: string,
   config: Config,
+  opts: TuiOptions = {},
 ): Promise<number> {
   const store = createStore(cwd);
-  const ink = render(createElement(App, { store, watch: true }));
+  const palette = resolvePalette({
+    theme: config.ui.theme,
+    noColor: opts.noColor,
+  });
+  const ink = render(createElement(App, { store, watch: true, palette }));
 
   let fatal: Error | undefined;
   let handle: WatchHandle | undefined;

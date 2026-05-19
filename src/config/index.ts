@@ -36,7 +36,20 @@ const ConfigSchema = z
 
 export type Config = z.infer<typeof ConfigSchema>;
 
-const CONFIG_FILENAME = "test-reporter-config.json";
+export const CONFIG_FILENAME = "test-reporter-config.json";
+
+/**
+ * The documented defaults (PRD §8), derived from the schema itself so the
+ * `init` command and the "no config file" path can never drift apart.
+ */
+export function defaultConfig(): Config {
+  return ConfigSchema.parse({});
+}
+
+/** Canonical on-disk form of {@link defaultConfig} — what `init` writes. */
+export function serializeDefaultConfig(): string {
+  return `${JSON.stringify(defaultConfig(), null, 2)}\n`;
+}
 
 /**
  * Load and validate the reporter config.
@@ -57,7 +70,7 @@ export function loadConfig(cwd: string, explicitPath?: string): Config {
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
       if (explicitPath) throw new ConfigError(`Config file not found: ${path}`);
-      return ConfigSchema.parse({});
+      return defaultConfig();
     }
     throw new ConfigError(
       `Could not read config ${path}: ${(err as Error).message}`,

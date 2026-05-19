@@ -25,5 +25,5 @@ export async function runWatch(opts: WatchOptions): Promise<number> {
     process.stderr.write(`${e.name}: ${e.message}\n`);
     return RUNNER_ERROR_EXIT;
   }
-  return renderWatchTui(opts.cwd, config);
+  return renderWatchTui(opts.cwd, config, { noColor: opts.noColor });
 }

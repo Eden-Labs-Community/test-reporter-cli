@@ -5,16 +5,18 @@
 
 ## Status atual
 
-**M1 + M2 + M3 implementados e verdes; runner plugável.** `check` headless +
-**`run` TUI Ink ao vivo** (default; decisão #18) + **`watch` TUI** (watcher
-**nativo do Vitest** — decisão #19/#14: testes relacionados; UI foca a suíte
-do último arquivo salvo, RF-04; `a`=tudo `f`=só falhas). Non-TTY/`--summary`/
-`--json` em `run`/`watch` → contrato do `check` (paridade testada). Runner por
-adapter+factory (`config.runner`): **Vitest e Jest** (watch é Vitest-only no
-v1 → débito M4). **60 testes** verdes (unit incl. store pura/streaming +
-e2e incl. paridades `run`≡`check` e `watch`≡`check`), lint+build limpos.
-Watch verificado fim-a-fim por diagnóstico event-level (path real) + pty-smoke
-(render/RF-04). Próximo: **M4** (polimento + débitos herdados).
+**M1–M4 implementados e verdes — v1 FINALIZADO; pacote publicável.** `check`
+headless determinístico (consumidor primário = Claude) + **`run`/`watch` TUI
+Ink ao vivo** (decisão #18; tema `auto/light/dark` + `--no-color`/`NO_COLOR`;
+tecla `s` = árvore de suítes navegável; detalhe da falha com diff+code-frame —
+tudo TUI-only) + **`init`** (safe-by-default, #20). **Watch:** Vitest =
+watcher nativo (#19); **Jest = `fs.watch` + re-run da suíte (#21)**. **Runner
+plugável** (Vitest/Jest) com **streaming incremental no Jest** via reporter
+`.cjs` (bridge `globalThis`; `done` final = agregado autoritativo → contrato
+intacto). Non-TTY/`--summary`/`--json` → contrato do `check` (paridade
+testada). **82 testes verdes**, lint+build limpos, **`npm pack` instalado e
+rodando fora do repo** (verificado). Decisões 🟡 #15/#16 resolvidas (fora do
+v1). Próximo: nada pendente p/ o v1 (release quando o usuário pedir).
 
 ## Milestones
 
@@ -25,12 +27,16 @@ Watch verificado fim-a-fim por diagnóstico event-level (path real) + pty-smoke
 - [x] **M3** — `test-reporter watch`: TUI ao vivo, watcher **nativo do Vitest**
   (decisão #19/#14), foco no último salvo (RF-04), `a`/`f`/`q`; non-TTY →
   contrato do `check`. *(Vitest-only no v1 → débito M4; ver SUCCESS.)*
-- [ ] **M4** — polimento (`init`, temas, publicação npm) + débitos herdados.
+- [x] **M4** — polimento & release: `init`, `ui.theme`/`--no-color`, help/
+  version por comando, **streaming incremental + watch p/ Jest (#21)**, árvore
+  de suítes, diff/code-frame, pacote publicável (`src/index.ts`), README,
+  decisões 🟡 resolvidas. *(contrato do `check` byte-inalterado.)*
 
 ## Feito
 
 - [x] Docs base: `PRD.md` (v0.7), `CLAUDE.md`, `progress.md`, `SUCCESS_CRITERIA.md`.
-- [x] `git init -b master` + remote `origin`. **Sem commits ainda.**
+- [x] `git init -b master` + remote `origin`. **4 commits** (init · M1 ·
+  runner plugável · M2); **M3 ainda no working tree** — ver Pendências › Git.
 - [x] **M1** (TDD-lite, red→green por módulo):
   - Scaffold ESM (`type:module`, `bin: test-reporter`, tsconfig strict/NodeNext,
     scripts build/test/lint).
@@ -83,24 +89,55 @@ Watch verificado fim-a-fim por diagnóstico event-level (path real) + pty-smoke
     save → `RERUN{trigger}` → testes re-executam o código novo →
     `DONE{failed:0}` (flip p/ verde ao vivo, RF-04 correto).
 
-## Próximo — M4 (ver SUCCESS_CRITERIA.md › M4)
+- [x] **M4 — `test-reporter init`** (TDD-lite; decisão #20 = safe-by-default):
+  - `config`: `defaultConfig()` + `serializeDefaultConfig()` — **fonte única**
+    dos defaults (derivada do zod); o caminho "sem arquivo" do `loadConfig`
+    passou a reusar `defaultConfig()` (DRY, byte-idêntico).
+  - `commands/init` (`runInit`): escreve `test-reporter-config.json` com os
+    defaults documentados; **recusa sobrescrever sem `--force`** (exit 1 +
+    stderr acionável); stdout = confirmação (humano, fora do contrato do
+    `check`). `cli` ganha `init` (`--cwd`/`--force`).
+  - Testes: `test/init.test.ts` (2 unit fonte-única + 3 e2e). **65 verdes**.
+- [x] **M4 — restante (TDD-lite, red→green por item; `check` byte-inalterado):**
+  - **`--no-color`/`ui.theme`:** `theme.ts` `resolvePalette` puro (mono se
+    `--no-color`/`NO_COLOR`; `auto/light/dark`) fiado por `App`/renderers/cli.
+    `test/theme.test.ts` (4).
+  - **help/version:** versão = fonte única (`createRequire('../package.json')`);
+    guarda pré-parse "unknown command" → exit 2 (default `run` engolia typo).
+    `test/cli.test.ts` (4 e2e).
+  - **diff/code-frame:** `codeframe.ts` puro/best-effort (`test/codeframe`, 3);
+    `RawTestError`/`Failure` ganham `expected?`/`actual?` (Vitest popula; Jest
+    não — sem parse de texto); só `FailureView` renderiza. Renderers do
+    contrato ignoram → e2e byte-exato segue verde.
+  - **árvore de suítes:** store `buildSuiteTree` + view `suites` + `treeFocus`
+    (`s`/`up`/`down`/`enter`); `SuitesView` no `App`. `tui-store` (+4).
+  - **Jest streaming+watch (#21):** reporter `jest-stream-reporter.cjs` (bridge
+    `globalThis`, mesmo processo) → streaming incremental; `JestAdapter.watch`
+    via `fs.watch` debounced re-rodando o `run` 1-shot; `ignoredWatchPath`
+    puro (`test/jest-watch`, 3). `runner-factory` perdeu o guard (Jest agora
+    suporta watch; só seleção). **Verificado por smoke event-level** num dir
+    real: `test:*` antes do `done` (streaming) + save → `rerun` → `done`
+    com veredito flipado (watch).
+  - **publicável:** `src/index.ts` (API headless); `build` copia o `.cjs`
+    (`scripts/copy-assets.mjs`); shebang/`bin`/`exports` OK. **`npm pack`
+    instalado em dir fora do repo** rodando `--version`/`init`/`check`
+    (pass/fail/`--json`/exit codes) + `import` da API — verificado.
+  - **README.md** (uso, contrato §7, exit codes, config, seção "For Claude/
+    agents"); decisões 🟡 **#15 monorepo / #16 coverage → fora do v1**
+    (PRD §10/§11). **82 verdes**, lint+build limpos.
 
-- [ ] `test-reporter init` gera `test-reporter-config.json` válido (zod).
-- [ ] `ui.theme` (auto/claro/escuro) + flag explícita `--no-color`.
-- [ ] **Débitos herdados:** streaming **incremental no Jest** (hoje batch;
-  habilita `watch` p/ Jest); **árvore de suítes** navegável; **diff/code-frame**
-  rico no detalhe da falha.
-- [ ] Publicável: `bin`/shebang/`exports`/`files`, `npm pack` instalável,
-  `npx test-reporter` fora do repo; `README` (incl. como o Claude chama `check`).
-- [ ] Resolver/registrar fora-de-escopo as decisões 🟡 restantes do PRD §10
-  (#15 monorepo, #16 coverage).
+## Próximo
+
+**Nada pendente para o v1.** App finalizado (ver SUCCESS_CRITERIA › STATUS).
+Release npm (`npm publish`) só quando o usuário pedir. Pós-v1 possível:
+monorepo (#15), coverage (#16), declarações `.d.ts` p/ a API.
 
 ## Critérios de sucesso
 
 Definição de pronto do app inteiro:
 **[SUCCESS_CRITERIA.md](SUCCESS_CRITERIA.md)** — fonte única; aqui só o estado.
-Status: **Globais + M1 + M2 + M3 marcados ✓** (M2/M3 com débitos de
-polimento explícitos → M4); **M4 pendente**.
+Status: **Globais + M1 + M2 + M3 + M4 marcados ✓ — v1 FINALIZADO.**
+`npm test` = 82 verdes; pacote instala e roda fora do repo (verificado).
 
 ## Pendências conhecidas / dívidas
 
@@ -114,18 +151,20 @@ polimento explícitos → M4); **M4 pendente**.
   `runner:"jest"` sem Jest instalado → `RunnerError` (exit > 1, sem falso PASS)
   — mesmo caminho dos demais erros de runner, coberto por design.
 - `npm audit`: 5 vulnerabilidades *moderate* transitivas (cadeia esbuild/vite
-  via vitest) — sem fix não-breaking; reavaliar no M4.
+  via vitest) — sem fix não-breaking; reavaliar pós-v1 / no bump do Vitest.
+- **API sem `.d.ts`:** `declaration:false` (consistente; produto principal =
+  CLI). `exports`/`main` resolvem em runtime; tipos p/ consumidores = pós-v1.
 - `line/col` da falha = **local da definição do teste** (`includeTaskLocation`/
   `testLocationInResults`), não o frame da assertiva — determinístico e
   suficiente p/ o contrato; revisitar se precisar do ponto da assertiva.
-- **Débitos M2/M3 → M4:** streaming **incremental no Jest** (hoje batch no
-  `done`; **habilita `watch` p/ Jest** — hoje `watch` é Vitest-only,
-  `jest.watch`→`RunnerError`); **árvore de suítes** navegável no resumo;
-  **diff/code-frame** rico no detalhe; flag **`--no-color`** (hoje só
-  `NO_COLOR` via Ink/chalk). O loop watch+Ink/Vitest **não é unit-testável**
-  (reentrância): a lógica vive na store pura (testada) + e2e de paridade;
-  o loop é verificado por **pty-smoke** (render/RF-04) + **diagnóstico
-  event-level** (veredito do ciclo num path real).
+- **Débitos M2/M3 — TODOS resolvidos no M4:** streaming incremental no Jest
+  (#21), `watch` p/ Jest (#21), árvore de suítes (`s`), diff/code-frame,
+  `--no-color` explícita. Os loops watch (Vitest+Ink; Jest+`fs.watch`) e o
+  streaming incremental do Jest **não são unit-testáveis** (reentrância) →
+  store pura testada + e2e de paridade + **smoke event-level** num dir real.
+- **Jest watch = suíte inteira** (não o grafo de relacionados como o Vitest):
+  tradeoff consciente do #21 (Jest não tem watcher nativo estável); confiável
+  e determinístico. Refinar p/ "só arquivos afetados" = possível pós-v1.
 - **Nota de teste (macOS, custou investigação):** **não** smoke-testar
   `watch` com o alvo sob `os.tmpdir()` — em macOS é `/var/folders/…` →
   symlink p/ `/private/var/…`; o chokidar do Vite detecta a mudança num
@@ -133,13 +172,15 @@ polimento explícitos → M4); **M4 pendente**.
   (falso "veredito não atualiza"). **Não é bug do produto** (projetos reais
   não vivem em tmpdir symlinkado); usar `realpath`/dir não-symlinkada nos
   testes manuais de watch. Ver memória `vitest-watch-tmpdir-symlink`.
+  *(Jest watch usa `fs.watch` + re-run completo, sem grafo Vite persistente
+  → não sofre o mesmo trap; ainda assim o smoke do #21 usou `realpathSync`.)*
 
-## Decisões em aberto — ver PRD §10
+## Decisões — todas resolvidas (ver PRD §10)
 
-- ✅ RF-03 (múltiplas falhas) → **resolvida: PRD #18** (last-failed-wins).
-- ✅ RF-04 watch (estratégia) → **resolvida: PRD #19** (= resolve #14;
-  watcher nativo do Vitest, testes relacionados, foco no salvo).
-- 🟡 #15 monorepo / #16 coverage → provável fora do v1 (decidir/registrar M4).
+- ✅ RF-03 → **#18** (last-failed-wins). ✅ RF-04 → **#19** (Vitest grafo) /
+  **#21** (Jest `fs.watch`). ✅ `init` → **#20** (safe-by-default).
+- ✅ **#15 monorepo / #16 coverage → FORA do v1** (decidido/registrado M4,
+  PRD §10/§11). Nenhuma decisão 🟡 pendente.
 
 ## Log de sessões
 
@@ -182,3 +223,28 @@ polimento explícitos → M4); **M4 pendente**.
   vs invalidação do Vite), **não** bug do produto — registrado. Git: descoberto
   que já há 4 commits em `master` (nota antiga "sem commit" estava errada).
   PRD v1.0 / CLAUDE / SUCCESS / memória atualizados.
+- **2026-05-18 (M4 — `init`):** decisão **#20** (init safe-by-default: recusa
+  clobber sem `--force`). TDD-lite red→green: `test/init.test.ts` (5 testes —
+  RED confirmado, 5/5). `config` ganhou `defaultConfig`/`serializeDefaultConfig`
+  como **fonte única** dos defaults (ENOENT do `loadConfig` refatorado p/
+  reusá-la, DRY); `commands/init`+`cli`. **65 verdes**, lint limpo, contrato
+  do `check` intacto (regressão da suíte cheia OK). PRD v1.1 / CLAUDE /
+  SUCCESS atualizados. Próximo M4: `--no-color`/`ui.theme`.
+- **2026-05-18 (M4 — restante, fechado num push):** a pedido do usuário, todos
+  os itens M4 restantes em sequência, TDD-lite red→green por item, `npm test`
+  cheio verde nos boundaries de risco de contrato. Entregue: `theme.ts`
+  (`--no-color`/`ui.theme`, 4 testes); help/version por comando + versão
+  fonte-única + guarda "unknown command" (4 e2e); `codeframe.ts` + `expected/
+  actual` no modelo → diff/code-frame **só TUI** (3 testes; renderers do
+  contrato ignoram → e2e byte-exato verde); árvore de suítes na store pura
+  (`buildSuiteTree`/`suites`/`treeFocus`, +4); **decisão #21** — streaming
+  incremental do Jest via reporter `.cjs` (bridge `globalThis`) + `JestAdapter.
+  watch` por `fs.watch` reusando o `run` 1-shot (`ignoredWatchPath` puro, 3;
+  `runner-factory` perdeu o guard); `src/index.ts` (API) + `copy-assets.mjs` no
+  build → **`npm pack` instalado e rodando fora do repo** (verificado:
+  `--version`/`init`/`check` pass/fail/`--json`/exit + `import` da API);
+  `README.md`; decisões 🟡 **#15/#16 → fora do v1**. Jest streaming+watch
+  (não unit-testável) **verificado por smoke event-level** num dir real
+  (`realpathSync`): `test:*` antes do `done` + save→`rerun`→`done` flipado.
+  **82 verdes**, lint+build limpos. PRD v1.2 / CLAUDE / SUCCESS atualizados.
+  **v1 FINALIZADO** (release npm só quando o usuário pedir).

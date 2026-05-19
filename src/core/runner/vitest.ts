@@ -13,6 +13,14 @@ import {
 interface VError {
   name?: string;
   message?: string;
+  expected?: unknown;
+  actual?: unknown;
+}
+
+/** Vitest pre-stringifies diff sides; coerce defensively, omit if absent. */
+function diffSide(v: unknown): string | undefined {
+  if (v === undefined) return undefined;
+  return typeof v === "string" ? v : JSON.stringify(v);
 }
 interface VTask {
   type?: string;
@@ -73,6 +81,8 @@ function walk(
               line: task.location?.line,
               col: task.location?.column,
               file: filepath,
+              expected: diffSide(err?.expected),
+              actual: diffSide(err?.actual),
             }
           : undefined,
     });

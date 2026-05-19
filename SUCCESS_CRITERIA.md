@@ -13,6 +13,10 @@
 Todos os critérios **Globais + M1 + M2 + M3 + M4** marcados · `npm test` verde ·
 pacote instala e roda fora do repo · PRD/CLAUDE/progress/este doc coerentes.
 
+> **STATUS: ✅ FINALIZADO (v1).** Globais + M1–M4 todos marcados; `npm test`
+> = **82 verdes**; `npm pack` instalado e rodando fora do repo (verificado);
+> os 4 docs coerentes. Decisões 🟡 #15/#16 resolvidas (fora do v1).
+
 ---
 
 ## Globais (cross-cutting — valem em qualquer milestone)
@@ -103,9 +107,10 @@ pacote instala e roda fora do repo · PRD/CLAUDE/progress/este doc coerentes.
 - [x] Testes (unit, sem render real): estado/seleção/navegação; **auto-foco em
   falha** e **contadores ao vivo** via eventos simulados (`tui-store.test.ts`);
   dedupe de streaming (`streaming.test.ts`).
-- [ ] **Tela de resumo dedicada** (árvore de suites navegável, `Enter` abre
-  suíte): **parcial** — overview ao vivo (contadores + duração + últimos
-  testes) e navegação de falhas prontos; árvore por suíte = polimento (→ M4).
+- [x] **Tela de resumo dedicada** (árvore de suites navegável, `enter` abre
+  suíte): entregue no M4 — `s` abre a árvore (`buildSuiteTree` puro, ordenado),
+  `↑`/`↓` navegam, `enter` salta p/ a 1ª falha da suíte. *(store pura testada
+  em `tui-store.test.ts`.)*
 
 ## M3 — `test-reporter watch` (RF-04)
 
@@ -124,26 +129,34 @@ pacote instala e roda fora do repo · PRD/CLAUDE/progress/este doc coerentes.
   no fim do `renderWatchTui`, sem watcher/processo vazado.
 - [x] **DRY:** reusa núcleo/modelo/store/`App`/`failureBlock` de M1/M2;
   helpers `collectAll`/`collectionError` compartilham coleta com o `run`
-  1-shot (refactor byte-idêntico, contrato `check` intacto). Watch é
-  **Vitest-only no v1** (`jest.watch`→`RunnerError`; débito M4).
+  1-shot (refactor byte-idêntico, contrato `check` intacto). *(M3 entregou
+  watch Vitest-only; **Jest watch resolvido no M4** — decisão #21.)*
 - [x] Testes (unit, sem render real): ciclo `rerun` (reset + `watchTrigger`
-  RF-04) e teclas `a`/`f` na store; guard `jest.watch`; e2e `watch`≡`check`
-  (Vitest+Jest, exit codes, runner-error). **60 verdes.** O loop watch+Ink
-  não é unit-testável (reentrância) → pty-smoke + diagnóstico event-level.
+  RF-04) e teclas `a`/`f` na store; e2e `watch`≡`check` (Vitest+Jest, exit
+  codes, runner-error). O loop watch+Ink não é unit-testável (reentrância) →
+  pty-smoke + diagnóstico event-level.
 
 ## M4 — polimento & release
 
-- [ ] `test-reporter init` gera um `test-reporter-config.json` válido (passa no
-  zod) com defaults documentados.
-- [ ] `ui.theme` (auto/claro/escuro), `NO_COLOR` e `--no-color` respeitados.
-- [ ] `--help`/`--version` completos por comando; mensagens de erro acionáveis.
-- [ ] **Débitos herdados de M2/M3:** streaming **incremental no Jest** (hoje
-  batch — **habilita `watch` p/ Jest**, hoje `jest.watch`→`RunnerError`);
-  **árvore de suítes navegável** no resumo; **diff/code-frame** rico no
-  detalhe da falha; flag **`--no-color`** explícita.
-- [ ] **Publicável:** `bin` + shebang corretos, `exports`/`files`, build limpo;
-  `npm pack` instalável; `npx test-reporter` funciona **fora** do repo.
-- [ ] `README` com uso (incl. **como o Claude deve chamar `check`**) e o
-  contrato de saída.
-- [ ] Todas as decisões 🟡 do PRD §10 resolvidas **ou** explicitamente fora de
-  escopo (registrado no PRD).
+- [x] `test-reporter init` gera um `test-reporter-config.json` válido (passa no
+  zod) com defaults documentados. *(fonte única `defaultConfig`/
+  `serializeDefaultConfig` derivada do schema; safe-by-default — recusa
+  sobrescrever sem `--force`, decisão #20; `test/init.test.ts` red→green.)*
+- [x] `ui.theme` (auto/claro/escuro), `NO_COLOR` e `--no-color` respeitados.
+  *(`resolvePalette` puro — `test/theme.test.ts`; fiado por `App`/renderers;
+  contrato headless segue ANSI-free.)*
+- [x] `--help`/`--version` completos por comando; mensagens de erro acionáveis.
+  *(versão = fonte única do `package.json`; guarda de comando desconhecido →
+  exit 2; `test/cli.test.ts`.)*
+- [x] **Débitos herdados de M2/M3:** streaming **incremental no Jest** via
+  reporter `.cjs` (bridge `globalThis`) — **`watch` p/ Jest habilitado**
+  (`fs.watch` + re-run, #21); **árvore de suítes navegável** (`s`);
+  **diff/code-frame** no detalhe; **`--no-color`** explícita. *(contrato do
+  `check` byte-inalterado; smoke event-level confirmou streaming+flip.)*
+- [x] **Publicável:** `bin`+shebang OK, `exports`/`files`, `src/index.ts` como
+  API, build copia o `.cjs`; **`npm pack` instalado fora do repo** rodando
+  `--version`/`init`/`check` (pass/fail/`--json`) — verificado.
+- [x] `README` com uso de todos os comandos, o contrato de saída e seção
+  **"For Claude / agents"** (exit-code-first, loop run→ler→corrigir).
+- [x] Decisões 🟡 do PRD §10 resolvidas: **#15 monorepo** e **#16 coverage**
+  → **fora do v1** (registrado §10/§11); #21 fecha o débito de watch do Jest.

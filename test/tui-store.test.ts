@@ -2,7 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import type { RawRun, RawTest } from "../src/core/result.js";
 import { createStore } from "../src/tui/createStore.js";
-import { initState, reduce, type TuiState } from "../src/tui/store.js";
+import {
+  buildSuiteTree,
+  initState,
+  reduce,
+  type TuiState,
+} from "../src/tui/store.js";
 
 const ROOT = "/proj";
 const t = (
@@ -143,6 +148,82 @@ describe("tui store — watch (M3)", () => {
     expect(s.command).toEqual({ kind: "all", seq: 3 });
     s = reduce(s, { type: "key", key: "q" });
     expect(s.exited).toBe(true);
+  });
+});
+
+describe("tui store — suite tree (M4)", () => {
+  const mk = (file: string, suite: string, st: RawTest["status"]): RawTest => ({
+    file: `${ROOT}/${file}`,
+    name: `${suite} > t`,
+    suite,
+    status: st,
+  });
+
+  it("buildSuiteTree groups by (file, suite), counts, deterministic order", () => {
+    const tree = buildSuiteTree([
+      mk("b.test.ts", "B", "passed"),
+      mk("a.test.ts", "A", "failed"),
+      mk("a.test.ts", "A", "passed"),
+      mk("a.test.ts", "A", "skipped"),
+    ]);
+    expect(tree.map((n) => `${n.file}|${n.suite}`)).toEqual([
+      `${ROOT}/a.test.ts|A`,
+      `${ROOT}/b.test.ts|B`,
+    ]);
+    expect(tree[0]).toMatchObject({
+      passed: 1,
+      failed: 1,
+      skipped: 1,
+      total: 3,
+    });
+  });
+
+  it("s toggles the suites view; up/down move and clamp", () => {
+    let s = initState(ROOT);
+    s = feed(
+      s,
+      mk("a.test.ts", "A", "passed"),
+      mk("b.test.ts", "B", "failed"),
+    );
+    s = reduce(s, { type: "key", key: "s" });
+    expect(s.view).toBe("suites");
+    expect(s.treeFocus).toBe(0);
+    s = reduce(s, { type: "key", key: "up" }); // clamp at 0
+    expect(s.treeFocus).toBe(0);
+    s = reduce(s, { type: "key", key: "down" });
+    expect(s.treeFocus).toBe(1);
+    s = reduce(s, { type: "key", key: "down" }); // clamp at last
+    expect(s.treeFocus).toBe(1);
+    s = reduce(s, { type: "key", key: "s" }); // toggle back
+    expect(s.view).toBe("overview");
+  });
+
+  it("enter on a failing suite jumps to its first failure; no-op on a green suite", () => {
+    let s = initState(ROOT);
+    s = feed(
+      s,
+      mk("a.test.ts", "A", "passed"), // green suite at tree index 0
+      t("b.test.ts", "B > boom", "failed", { name: "E", message: "m" }),
+    );
+    // failure stole focus → go to suites and select the green suite (idx 0)
+    s = reduce(s, { type: "key", key: "s" });
+    expect(s.view).toBe("suites");
+    s = reduce(s, { type: "key", key: "enter" }); // green suite → no-op
+    expect(s.view).toBe("suites");
+    s = reduce(s, { type: "key", key: "down" }); // select b.test.ts/B
+    s = reduce(s, { type: "key", key: "enter" });
+    expect(s.view).toBe("failure");
+    expect(s.result.failures[s.focused]?.test).toBe("B > boom");
+  });
+
+  it("rerun resets the tree selection", () => {
+    let s = initState(ROOT);
+    s = feed(s, mk("a.test.ts", "A", "passed"), mk("b.test.ts", "B", "passed"));
+    s = reduce(s, { type: "key", key: "s" });
+    s = reduce(s, { type: "key", key: "down" });
+    expect(s.treeFocus).toBe(1);
+    s = reduce(s, { type: "rerun", trigger: `${ROOT}/a.test.ts` });
+    expect(s.treeFocus).toBe(0);
   });
 });
 

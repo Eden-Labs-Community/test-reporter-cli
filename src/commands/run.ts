@@ -6,6 +6,8 @@ import { type CheckOptions, runCheck } from "./check.js";
 export interface RunOptions extends CheckOptions {
   /** Force the headless verdict even on a TTY. */
   summary?: boolean;
+  /** `--no-color`: disable ANSI color in the live TUI. */
+  noColor?: boolean;
 }
 
 /**
@@ -26,5 +28,5 @@ export async function runRun(opts: RunOptions): Promise<number> {
     process.stderr.write(`${e.name}: ${e.message}\n`);
     return RUNNER_ERROR_EXIT;
   }
-  return renderTui(opts.cwd, config);
+  return renderTui(opts.cwd, config, { noColor: opts.noColor });
 }

@@ -28,7 +28,7 @@ Esses quatro devem sempre refletir a realidade atual.
 
 `test-reporter-cli`: CLI de relatório de testes — **`run`/`watch`/`check`**
 (+ `init`) e **dois públicos distintos** (dev na TUI · Claude no `check`).
-**M1–M4 verdes (82 testes); pacote publicável.**
+**M1–M4 verdes + UX v1.1 (100 testes); pacote publicável.**
 
 - **`test-reporter run`** — TUI (Ink) bonita e ao vivo, para devs; comando
   default. Foca a falha no instante em que acontece (decisão #18). Non-TTY/CI/
@@ -41,9 +41,10 @@ Esses quatro devem sempre refletir a realidade atual.
   estável**. **Consumidor primário = o Claude usando como ferramenta** num loop
   agêntico (rodar → ler veredito → corrigir). **(M1 ✔)**
 - **`test-reporter init`** — scaffold do config (safe-by-default, #20). **(M4)**
-- **TUI (M4):** tema `auto/light/dark` + `--no-color`/`NO_COLOR`; tecla `s` =
-  árvore de suítes navegável; detalhe da falha com diff + code-frame. Tudo
-  **TUI-only** — `check` segue ANSI-free e byte-idêntico.
+- **TUI (M4 + UX v1.1):** tema `auto/light/dark` + `--no-color`/`NO_COLOR`;
+  `s` = árvore de suítes; `l` = **lista de testes rolável**, `enter`/`o`
+  **abre o teste no editor** (arquivo:linha, #22); detalhe da falha com diff +
+  code-frame. Tudo **TUI-only** — `check` segue ANSI-free e byte-idêntico.
 
 ## Stack
 
@@ -80,23 +81,26 @@ runner = **só um novo adapter** (núcleo/contrato intactos).
 - **Exit code:** `0` tudo passou · `1` algum teste falhou · `>1` erro de
   runner/config.
 - **`--json` versionado** (`schemaVersion`).
-- **M4 não regride o contrato:** `expected`/`actual` (modelo) e o code-frame
-  são **só da TUI**; `summary`/`json` os ignoram → bytes inalterados. Jest
-  streaming só liga com sink (TUI); `check` não passa sink. Provado pelos
-  e2e byte-exatos verdes.
+- **M4/UX-v1.1 não regridem o contrato:** `expected`/`actual` **e
+  `line`/`col` por teste** (modelo `RawTest`) + code-frame são **só da TUI**;
+  `summary`/`json` os ignoram → bytes inalterados. Jest streaming só liga com
+  sink (TUI); `check` não passa sink. Provado pelos e2e byte-exatos verdes.
 
 Detalhes completos do contrato: **PRD.md §7**.
 
 ## Estrutura do código (M1–M4)
 
-- `src/config` — loader + zod schema/defaults (`ConfigError`); campo `runner`.
-  `defaultConfig()`/`serializeDefaultConfig()` = **fonte única** dos defaults
+- `src/config` — loader + zod schema/defaults (`ConfigError`); campos `runner`
+  e `ui.editor` (string, default `code`) = **única fonte da escolha do editor**
+  da TUI (sem `.env`/env). `defaultConfig()`/`serializeDefaultConfig()` =
+  **fonte única** dos defaults
   (derivada do schema); o caminho "sem arquivo" do `loadConfig` e o `init`
   consomem essa fonte (DRY — nunca divergem).
 - `src/core/result` — modelo normalizado + `normalize` (determinístico).
   `toPosixRelative` **exportado** (reuso na store/TUI — DRY). `Failure` tem
-  `expected?`/`actual?` **opcionais** (TUI-only; renderers do contrato os
-  ignoram → bytes inalterados; sem I/O em `normalize`).
+  `expected?`/`actual?` e `RawTest` tem `line?`/`col?` (loc. de definição de
+  todo teste) **opcionais — TUI-only**; renderers do contrato os ignoram →
+  bytes inalterados; sem I/O em `normalize`.
 - `src/core/runner/` — abstração do runner (único lugar que conhece Vitest/Jest):
   - `adapter` — classe abstrata `TestRunnerAdapter` (`run` + `watch`) +
     `RunnerError` + `WatchHandle` (`triggerAll`/`triggerFailed`/`close`).
@@ -128,15 +132,25 @@ Detalhes completos do contrato: **PRD.md §7**.
 - `src/tui/store` — **store pura** (reducer): decisão #18 (last-failed-wins),
   `n`/`p`/`esc`/`q`, `done` autoritativo; `rerun` (zera ciclo + `watchTrigger`
   RF-04), `a`/`f` → `command` (seq monotônica). **M4:** view `suites` +
-  `buildSuiteTree` (selector puro, ordenado por arquivo→suíte) + `treeFocus`;
-  `s` alterna, `up`/`down` navegam (clamp), `enter` salta p/ a 1ª falha da
-  suíte. Sem React. `tui/createStore` — observable p/ `useSyncExternalStore`.
-- `src/renderers/tui` — Ink: `App.tsx` (Overview/FailureView/**SuitesView** +
-  `useInput`; prop `watch`; prop `palette`); `theme.ts` (`resolvePalette`
-  **puro** — `auto/light/dark`, `--no-color`/`NO_COLOR` → mono); `codeframe.ts`
-  (`codeFrame` **puro/best-effort**, 1 read sync, nunca lança); `index.ts`
-  `renderTui`/`renderWatchTui` (resolvem palette via `config.ui.theme`+
-  `--no-color`; `close()` sem watcher vazado). Só TTY; erro → stderr + exit>1.
+  `buildSuiteTree` (selector puro) + `treeFocus`. **UX v1.1 (#22):** view
+  `tests` + `buildTestList` (puro, ordem arquivo→nome) + `listFocus`/
+  `listOffset` (janela `LIST_PAGE`, helper `windowAround` puro) + `openRequest`
+  (seq monotônica, edge abre no editor — disciplina do `command`/`exited`);
+  `l` alterna, `↑`/`↓`/`PgUp`/`PgDn` rolam, `enter`/`o`/`open` abrem.
+  `openTarget`→`absFile` (sempre **absoluto**; editor roda detached sem cwd);
+  `notice` mostra o caminho real + o edge reporta `opened/erro` de volta
+  (input `{type:"notice"}`). Sem React. `tui/createStore` — observable.
+- `src/renderers/tui` — Ink: `App.tsx` (Overview/FailureView/SuitesView/
+  **TestsView** + `useInput`; props `watch`/`palette`); `theme.ts`
+  (`resolvePalette` **puro**); `codeframe.ts` (`codeFrame` **puro/best-effort**,
+  nunca lança); `editor.ts` (`editorCommand` **puro**; recebe a string
+  `ui.editor` do config — **sem `.env`/`$EDITOR`/`$VISUAL`**; blank → default
+  `code`; VS Code & forks cursor/windsurf/codium → `-g arq:linha:col`;
+  testado); `index.ts` `renderTui`/`renderWatchTui` (palette via tema/
+  `--no-color`; **`wireEditor(store, config.ui.editor)`** = edge DRY: spawna o
+  editor por `openRequest.seq` detached e **reporta `notice`** de volta —
+  erro acionável "set ui.editor"; `close()` sem watcher vazado). Só TTY;
+  erro → stderr + exit>1.
 - `src/commands/check` — compõe; veredito→stdout, erros→stderr.
 - `src/commands/run` — TTY → `renderTui`; headless → delega `runCheck` (DRY).
 - `src/commands/watch` — TTY → `renderWatchTui`; headless → `runCheck`
@@ -154,7 +168,8 @@ Detalhes completos do contrato: **PRD.md §7**.
   "unknown command" + exit 2 (senão o default `run` engoliria o typo).
 - `scripts/copy-assets.mjs` — copia o `.cjs` p/ `dist/` no `build`.
 - `test/*.test.ts` unit (`runner-factory` = só seleção, **nunca** `.run()`/
-  `.watch()`; `theme`, `codeframe`, `jest-watch`=`ignoredWatchPath` puro) +
+  `.watch()`; `theme`, `codeframe`, `jest-watch`=`ignoredWatchPath`,
+  `editor`=`editorCommand` puro; `tui-store` cobre lista/scroll/`open`) +
   `e2e.test.ts`; `test/fixtures/*` (Vitest + `jest-*` paridade).
 - `test/init.test.ts`/`cli.test.ts` — e2e do `init` e de help/version/unknown.
 - **M1–M4 completos.** Loops watch (Vitest+Ink, Jest+`fs.watch`) e streaming
@@ -180,7 +195,7 @@ Detalhes completos do contrato: **PRD.md §7**.
   Sempre processo filho. (Por isso `runner-factory.test.ts` só **constrói** o
   adapter, nunca chama `.run()`.)
 - Comandos: `npm run build` (**tsc + `copy-assets.mjs`** copia o `.cjs` p/
-  `dist/`) · `npm test` (vitest run, **82 verdes**) · `npm run lint`
+  `dist/`) · `npm test` (vitest run, **100 verdes**) · `npm run lint`
   (= `tsc --noEmit`). Não precisa buildar p/ testar — e2e roda via `tsx`
   (o `.cjs` resolve em `src/` via `import.meta.url`). Publicável verificado:
   `npm pack` instala e roda fora do repo (`bin`/shebang/`exports` OK).

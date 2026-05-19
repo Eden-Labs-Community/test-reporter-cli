@@ -4,7 +4,12 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 import { toPosixRelative } from "../../core/result.js";
 import type { Store } from "../../tui/createStore.js";
-import { type TuiState, buildSuiteTree } from "../../tui/store.js";
+import {
+  LIST_PAGE,
+  type TuiState,
+  buildSuiteTree,
+  buildTestList,
+} from "../../tui/store.js";
 import { failureBlock } from "../summary.js";
 import { codeFrame } from "./codeframe.js";
 import type { Palette } from "./theme.js";
@@ -62,10 +67,10 @@ function Overview({
     s.phase === "running"
       ? `running… · [q] quit`
       : watch
-        ? `watching… · ${n > 0 ? "[n]/[p] inspect · " : ""}[s]uites [a]ll [f]ailed · [q]uit`
+        ? `watching… · ${n > 0 ? "[n]/[p] inspect · " : ""}[l]ist [s]uites [a]ll [f]ailed · [q]uit`
         : n > 0
-          ? `${n} failure(s) · [n]/[p] inspect · [s]uites · [q] quit`
-          : "all green · [s]uites · [q] quit";
+          ? `${n} failure(s) · [n]/[p] inspect · [l]ist [s]uites · [q] quit`
+          : "all green · [l]ist [s]uites · [q] quit";
   const headline =
     s.phase === "running" ? (
       <Text color={p.warn}>{SPIN[tick % SPIN.length]} running</Text>
@@ -143,7 +148,7 @@ function FailureView({ s, p }: { s: TuiState; p: Palette }) {
       <Box marginTop={1}>
         <Text dimColor>
           failure {s.focused + 1}/{s.result.failures.length} · [n]ext [p]rev ·
-          [esc] overview · [q]uit
+          [o]pen · [esc] overview · [q]uit
         </Text>
       </Box>
     </Box>
@@ -176,7 +181,63 @@ function SuitesView({ s, p }: { s: TuiState; p: Palette }) {
       </Box>
       <Box marginTop={1}>
         <Text dimColor>
-          [↑]/[↓] move · [enter] open failing · [s] back · [q] quit
+          [↑]/[↓] move · [enter] open failing · [o]pen file · [s] back · [q]
+          quit
+        </Text>
+      </Box>
+    </Box>
+  );
+}
+
+function TestsView({ s, p }: { s: TuiState; p: Palette }) {
+  const list = buildTestList(s.tests);
+  const offset = Math.min(s.listOffset, Math.max(0, list.length - LIST_PAGE));
+  const shown = list.slice(offset, offset + LIST_PAGE);
+  const end = Math.min(offset + LIST_PAGE, list.length);
+  return (
+    <Box flexDirection="column">
+      <Text color={p.accent} bold>
+        tests{" "}
+        <Text dimColor>
+          ({list.length === 0 ? 0 : offset + 1}–{end} of {list.length})
+        </Text>
+      </Text>
+      <Box flexDirection="column" marginTop={1}>
+        {list.length === 0 && <Text dimColor>no tests yet…</Text>}
+        {shown.map((t, i) => {
+          const idx = offset + i;
+          const sel = idx === s.listFocus;
+          const rel = toPosixRelative(s.rootDir, t.file);
+          const loc =
+            t.line === undefined
+              ? rel
+              : `${rel}:${t.line}${t.col === undefined ? "" : `:${t.col}`}`;
+          return (
+            <Box key={`${t.file} ${t.name}`} flexDirection="column" marginBottom={1}>
+              <Text>
+                <Text color={sel ? p.accent : undefined}>{sel ? "❯ " : "  "}</Text>
+                <Text color={hue(p, t.status)}>{glyph(t.status)}</Text>{" "}
+                <Text bold={sel} color={t.status === "failed" ? p.fail : undefined}>
+                  {t.name}
+                </Text>
+              </Text>
+              <Text dimColor>
+                {"    "}
+                {loc}
+                {t.durationMs === undefined
+                  ? ""
+                  : ` · ${Math.round(t.durationMs)}ms`}
+              </Text>
+            </Box>
+          );
+        })}
+      </Box>
+      <Box marginTop={1}>
+        <Text dimColor>
+          {offset > 0 ? "▲ " : "  "}
+          {end < list.length ? "▼ " : "  "}
+          [↑]/[↓] scroll · [PgUp]/[PgDn] page · [enter]/[o] open in editor ·
+          [l]/[esc] back · [q] quit
         </Text>
       </Box>
     </Box>
@@ -201,6 +262,10 @@ export function App({
     if (input === "q" || (key.ctrl && input === "c"))
       store.dispatch({ type: "key", key: "q" });
     else if (input === "s") store.dispatch({ type: "key", key: "s" });
+    else if (input === "l") store.dispatch({ type: "key", key: "l" });
+    else if (input === "o") store.dispatch({ type: "key", key: "open" });
+    else if (key.pageUp) store.dispatch({ type: "key", key: "pgup" });
+    else if (key.pageDown) store.dispatch({ type: "key", key: "pgdn" });
     else if (key.upArrow) store.dispatch({ type: "key", key: "up" });
     else if (key.downArrow) store.dispatch({ type: "key", key: "down" });
     else if (key.return) store.dispatch({ type: "key", key: "enter" });
@@ -225,9 +290,25 @@ export function App({
   const elapsed =
     s.phase === "done" ? s.result.durationMs : Date.now() - startRef.current;
 
-  if (s.view === "failure") return <FailureView s={s} p={palette} />;
-  if (s.view === "suites") return <SuitesView s={s} p={palette} />;
+  const view =
+    s.view === "failure" ? (
+      <FailureView s={s} p={palette} />
+    ) : s.view === "suites" ? (
+      <SuitesView s={s} p={palette} />
+    ) : s.view === "tests" ? (
+      <TestsView s={s} p={palette} />
+    ) : (
+      <Overview s={s} tick={tick} elapsed={elapsed} watch={watch} p={palette} />
+    );
+  // Single place for the transient editor/status notice (DRY across views).
   return (
-    <Overview s={s} tick={tick} elapsed={elapsed} watch={watch} p={palette} />
+    <Box flexDirection="column">
+      {view}
+      {s.notice !== undefined && (
+        <Box marginTop={1}>
+          <Text color={palette.warn}>» {s.notice}</Text>
+        </Box>
+      )}
+    </Box>
   );
 }

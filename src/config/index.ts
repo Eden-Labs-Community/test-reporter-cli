@@ -29,6 +29,10 @@ const ConfigSchema = z
       .object({
         autoFocusFailures: z.boolean().default(true),
         theme: z.enum(["auto", "light", "dark"]).default("auto"),
+        /** Command used to open a test in the editor (TUI "open" action).
+         *  VS Code & forks (`code`/`cursor`/`windsurf`/`codium`/…) get
+         *  `-g file:line:col`; vim-family `+line`; sublime/atom `file:line`. */
+        editor: z.string().default("code"),
       })
       .default({}),
   })

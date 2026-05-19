@@ -5,18 +5,20 @@
 
 ## Status atual
 
-**M1–M4 implementados e verdes — v1 FINALIZADO; pacote publicável.** `check`
+**M1–M4 verdes — v1 FINALIZADO + UX v1.1; pacote publicável.** `check`
 headless determinístico (consumidor primário = Claude) + **`run`/`watch` TUI
 Ink ao vivo** (decisão #18; tema `auto/light/dark` + `--no-color`/`NO_COLOR`;
-tecla `s` = árvore de suítes navegável; detalhe da falha com diff+code-frame —
-tudo TUI-only) + **`init`** (safe-by-default, #20). **Watch:** Vitest =
-watcher nativo (#19); **Jest = `fs.watch` + re-run da suíte (#21)**. **Runner
-plugável** (Vitest/Jest) com **streaming incremental no Jest** via reporter
-`.cjs` (bridge `globalThis`; `done` final = agregado autoritativo → contrato
-intacto). Non-TTY/`--summary`/`--json` → contrato do `check` (paridade
-testada). **82 testes verdes**, lint+build limpos, **`npm pack` instalado e
-rodando fora do repo** (verificado). Decisões 🟡 #15/#16 resolvidas (fora do
-v1). Próximo: nada pendente p/ o v1 (release quando o usuário pedir).
+`s` = árvore de suítes; **`l` = lista de testes rolável, `enter`/`o` abre no
+editor de `ui.editor` no config — #22**; detalhe da falha com diff+code-frame
+— tudo TUI-only) +
+**`init`** (safe-by-default, #20). **Watch:** Vitest = watcher nativo (#19);
+**Jest = `fs.watch` + re-run da suíte (#21)**. **Runner plugável** (Vitest/
+Jest) com **streaming incremental no Jest** via reporter `.cjs` (bridge
+`globalThis`; `done` final = agregado autoritativo → contrato intacto).
+Non-TTY/`--summary`/`--json` → contrato do `check` (paridade testada).
+**94 testes verdes**, lint+build limpos, **`npm pack` instalado e rodando
+fora do repo** (verificado). Decisões 🟡 #15/#16 resolvidas (fora do v1).
+Próximo: nada pendente (release npm quando o usuário pedir).
 
 ## Milestones
 
@@ -136,8 +138,8 @@ monorepo (#15), coverage (#16), declarações `.d.ts` p/ a API.
 
 Definição de pronto do app inteiro:
 **[SUCCESS_CRITERIA.md](SUCCESS_CRITERIA.md)** — fonte única; aqui só o estado.
-Status: **Globais + M1 + M2 + M3 + M4 marcados ✓ — v1 FINALIZADO.**
-`npm test` = 82 verdes; pacote instala e roda fora do repo (verificado).
+Status: **Globais + M1–M4 ✓ — v1 FINALIZADO + UX v1.1 (#22) ✓.**
+`npm test` = 94 verdes; pacote instala e roda fora do repo (verificado).
 
 ## Pendências conhecidas / dívidas
 
@@ -248,3 +250,50 @@ Status: **Globais + M1 + M2 + M3 + M4 marcados ✓ — v1 FINALIZADO.**
   (`realpathSync`): `test:*` antes do `done` + save→`rerun`→`done` flipado.
   **82 verdes**, lint+build limpos. PRD v1.2 / CLAUDE / SUCCESS atualizados.
   **v1 FINALIZADO** (release npm só quando o usuário pedir).
+- **2026-05-19 (UX v1.1 — lista rolável + abrir no editor, #22):** a pedido
+  do usuário; mecanismo escolhido por ele = **teclado + editor** (não clique
+  de mouse). TDD-lite red→green: store (`tui-store` +6: `buildTestList`,
+  view `tests`, `l`/`↑↓`/`PgUp`/`PgDn`/scroll `windowAround`, `open`/`enter`
+  → `openRequest` seq) + `editor.test.ts` (+4, `editorCommand` puro). Modelo:
+  `RawTest.line/col` (toda execução; Vitest `task.location`, Jest
+  `a.location`) **TUI-only**. Render: `TestsView` (linhas espaçadas/maiores,
+  `arquivo:linha:col` clicável no VS Code/iTerm); `wireEditor` edge DRY
+  (spawn best-effort) em `run`+`watch`. **92 verdes**, lint+build limpos,
+  dist compila (`editor.js`+`.cjs`). **Contrato do `check` byte-inalterado**
+  (e2e). *Transparência:* 3 e2e quebraram por a fixture
+  `test/fixtures/mixed/src/feature.test.ts` ter ficado `test.skip("is
+  broken")` da brincadeira anterior do `watch` — **revertido** p/
+  `test("is broken")` (estado correto asserido pela suíte), não regressão do
+  código novo. PRD v1.3 (decisão #22) / CLAUDE / SUCCESS / memória atualizados.
+- **2026-05-19 (refino #22 — feedback + caminho absoluto):** usuário relatou
+  "Enter não abre". Diagnóstico (probe event-level): `RawTest.file` já era
+  **absoluto** e o `code -g` recebia o caminho certo — o que confundia era
+  (a) **sem feedback** do spawn e (b) o `notice` exibia caminho **relativo ao
+  `--cwd`** (`src/…`, parecia faltar `playground/`). Fix TDD-lite: `notice` na
+  store (input `{type:"notice"}`, +1 teste) — edge reporta `opening <abs>` →
+  `opened in <cmd>`/erro acionável; `openTarget`→`absFile` garante **caminho
+  absoluto** ao editor; `notice` mostra o caminho real. **93 verdes**,
+  lint+build OK. Causa de uso provável: faltou `l` (Enter na Overview é
+  no-op; playground com `auth`/`cart` skipados = 0 falhas → fica na Overview).
+- **2026-05-19 (refino #22 — suporte a `.env`):** usuário pôs `EDITOR` no
+  `.env`; Node não carrega `.env` sozinho. TDD-lite: `parseDotenv` (parser
+  mínimo próprio, **sem dep nova**) + `resolveEditorEnv` (precedência **env
+  real > `.env` > default `code`**) puros/testados; `wireEditor` lê `.env` do
+  `--cwd` e do dir de lançamento (best-effort, por press → pega edição ao
+  vivo). VS Code forks (`cursor`/`windsurf`/`codium`/`vscodium`) tratados
+  como VS Code (`-g arq:linha:col`). Probe end-to-end confirmou
+  `.env EDITOR=cursor` → `cursor -g <abs>:6:3`. **100 verdes**, lint+build
+  OK. PRD #22 / CLAUDE / SUCCESS / progress / memória reconciliados (contagem
+  → 100).
+- **2026-05-19 (refino #22 — editor no config, escolha do usuário):** usuário
+  pediu para a escolha do editor **pertencer ao `test-reporter-config.json`**,
+  não ao `.env`/env. Schema zod ganha `ui.editor` (string, default `code`) —
+  fonte única (init/`serializeDefaultConfig` herdam). `editorCommand` agora
+  recebe a string do config (não mais `env`); **removidos** `parseDotenv`,
+  `resolveEditorEnv`, `dotenvEditorEnv` e a leitura de `.env`; `wireEditor`
+  recebe `config.ui.editor`; `notice` de erro aponta "set ui.editor". `.env`
+  do projeto **apagado**; criado `test-reporter-config.json` com os defaults.
+  `editor.test.ts` enxuto (só `editorCommand`, string); defaults literais
+  (config/init) ganham `editor:"code"`. Docs (PRD §8/#22, README, CLAUDE,
+  SUCCESS) reconciliados. **94 verdes** (−6 = testes `.env`/env removidos),
+  lint+build limpos.

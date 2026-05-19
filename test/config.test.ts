@@ -23,7 +23,7 @@ const DEFAULTS = {
   defaultMode: "standard",
   watch: { followLastSaved: true },
   summary: { detail: "cause", maxFailures: 50 },
-  ui: { autoFocusFailures: true, theme: "auto" },
+  ui: { autoFocusFailures: true, theme: "auto", editor: "code" },
 };
 
 describe("loadConfig", () => {

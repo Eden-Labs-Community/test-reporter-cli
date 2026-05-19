@@ -20,6 +20,10 @@ export interface RawTest {
   status: TestStatus;
   durationMs?: number;
   error?: RawTestError;
+  /** Test-definition location (every test, not just failures) — TUI list
+   *  "open in editor" only; the `check` contract does not read this. */
+  line?: number;
+  col?: number;
 }
 export interface RawRun {
   rootDir: string;

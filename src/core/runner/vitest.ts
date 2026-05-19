@@ -73,6 +73,10 @@ function walk(
       suite: prefix.join(" > "),
       status,
       durationMs: task.result?.duration,
+      // Per-test definition location (every test) for the TUI list's
+      // "open in editor". `includeTaskLocation:true` makes this available.
+      line: task.location?.line,
+      col: task.location?.column,
       error:
         status === "failed"
           ? {

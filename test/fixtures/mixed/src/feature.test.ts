@@ -5,7 +5,7 @@ describe("feature", () => {
     expect(true).toBe(true);
   });
 
-  test.skip("is broken", () => {
+  test("is broken", () => {
     expect(2).toBe(5);
   });
 

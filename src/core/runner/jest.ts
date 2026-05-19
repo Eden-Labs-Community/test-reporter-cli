@@ -82,6 +82,10 @@ function toRawTest(a: JAssertion, file: string): RawTest {
     suite: (a.ancestorTitles ?? []).join(" > "),
     status,
     durationMs: a.duration ?? undefined,
+    // Per-test location (every test) for the TUI list's "open in editor".
+    // `testLocationInResults:true` populates `a.location`.
+    line: a.location?.line,
+    col: a.location?.column,
     error: status === "failed" ? toError(a, file) : undefined,
   };
 }

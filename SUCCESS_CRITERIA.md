@@ -13,9 +13,10 @@
 Todos os critérios **Globais + M1 + M2 + M3 + M4** marcados · `npm test` verde ·
 pacote instala e roda fora do repo · PRD/CLAUDE/progress/este doc coerentes.
 
-> **STATUS: ✅ FINALIZADO (v1).** Globais + M1–M4 todos marcados; `npm test`
-> = **82 verdes**; `npm pack` instalado e rodando fora do repo (verificado);
-> os 4 docs coerentes. Decisões 🟡 #15/#16 resolvidas (fora do v1).
+> **STATUS: ✅ FINALIZADO (v1) + UX v1.1.** Globais + M1–M4 marcados; `npm
+> test` = **100 verdes**; `npm pack` instalado e rodando fora do repo
+> (verificado); os 4 docs coerentes. Decisões 🟡 #15/#16 resolvidas (fora do
+> v1). **UX v1.1 (#22):** lista de testes rolável + abrir no editor — feito.
 
 ---
 
@@ -160,3 +161,22 @@ pacote instala e roda fora do repo · PRD/CLAUDE/progress/este doc coerentes.
   **"For Claude / agents"** (exit-code-first, loop run→ler→corrigir).
 - [x] Decisões 🟡 do PRD §10 resolvidas: **#15 monorepo** e **#16 coverage**
   → **fora do v1** (registrado §10/§11); #21 fecha o débito de watch do Jest.
+
+## UX v1.1 — lista de testes rolável + abrir no editor (decisão #22)
+
+- [x] View `tests` (`l`): lista **plana de todos os testes**, ordem
+  determinística (arquivo→nome), linhas maiores/espaçadas, com
+  `arquivo:linha:col` visível. *(store pura `buildTestList`; render Ink.)*
+- [x] **Rolável/navegável por teclado:** `↑`/`↓` move + rola a janela
+  (`LIST_PAGE`/`windowAround` puro), `PgUp`/`PgDn` por página, clamp nas
+  pontas; `rerun` zera foco/scroll. *(unit `tui-store.test.ts`.)*
+- [x] **Abrir no editor:** `enter`/`o` → `openRequest` (seq monotônica) →
+  edge `wireEditor` spawna o editor de **`ui.editor` no config**
+  (`test-reporter-config.json`, default `code -g`; sem `.env`/`$EDITOR`/
+  `$VISUAL`) em arquivo:linha:col. Também no detalhe da falha (`o`).
+  `editorCommand(editor)` **puro** testado (`editor.test.ts`); spawn
+  best-effort (editor ausente → `notice` acionável "set ui.editor").
+- [x] **Contrato intato:** `RawTest.line/col` é **TUI-only**; e2e byte-exato
+  do `check` segue verde. `npm test` = **100 verdes**.
+- [x] Mecanismo decidido pelo usuário: **teclado + editor**, não captura de
+  clique de mouse (frágil/fora do design do Ink) — registrado PRD #22.

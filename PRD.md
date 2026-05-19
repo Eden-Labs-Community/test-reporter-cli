@@ -1,9 +1,10 @@
 # PRD — test-reporter-cli
 
-> Documento vivo (v1.2). 🟢 decidido · 🟡 em aberto · 🔵 proposta minha sujeita a validação.
-> **M1–M4 implementados e verdes (82 testes); pacote publicável.** Runner
-> plugável (Vitest/Jest, ambos com watch); TUI `run`/`watch` ao vivo (tema,
-> árvore de suítes, diff/code-frame); `check` headless determinístico; `init`.
+> Documento vivo (v1.3). 🟢 decidido · 🟡 em aberto · 🔵 proposta minha sujeita a validação.
+> **M1–M4 verdes + UX v1.1 (100 testes); pacote publicável.** Runner plugável
+> (Vitest/Jest, ambos com watch); TUI `run`/`watch` ao vivo (tema, árvore de
+> suítes, **lista de testes rolável + abrir no editor**, diff/code-frame);
+> `check` headless determinístico; `init`.
 
 ## 1. Visão geral
 
@@ -120,12 +121,14 @@ Em sucesso: `"status": "pass"`, `"ok": true`, `"failed": 0`, `"failures": []`.
   "defaultMode": "standard",
   "watch": { "followLastSaved": true },
   "summary": { "detail": "cause", "maxFailures": 50 },
-  "ui": { "autoFocusFailures": true, "theme": "auto" }
+  "ui": { "autoFocusFailures": true, "theme": "auto", "editor": "code" }
 }
 ```
 
 (`runner`: `"vitest"` | `"jest"`, default `"vitest"`. Novos runners = novo
-adapter, sem mudar schema/contrato.)
+adapter, sem mudar schema/contrato. `ui.editor`: comando do editor para
+"abrir teste" na TUI, default `"code"` — **única fonte da escolha do editor**,
+sem `.env`/`$EDITOR`/`$VISUAL`.)
 
 ## 9. Comandos / UX 🟢
 
@@ -143,11 +146,13 @@ adapter, sem mudar schema/contrato.)
   as falhas, `n`/`p`/`esc`/`s` como no `run`, `q`/Ctrl-C encerra limpo.
   Non-TTY / CI / `--summary` / `--json` → 1 execução = contrato do `check`.
   **(M3 ✔ · Jest watch M4 ✔)**
-- **Teclas/UX comuns (M4):** `s` abre a **árvore de suítes** navegável
-  (`↑`/`↓`, `enter` abre suíte com falha); o detalhe da falha mostra **diff +
-  code-frame** quando o runner fornece; `--no-color`/`NO_COLOR` e
-  `ui.theme` (`auto/light/dark`) — tudo **TUI-only**, o contrato do `check`
-  segue ANSI-free e byte-idêntico.
+- **Teclas/UX comuns (M4 + UX v1.1):** `s` = **árvore de suítes** navegável
+  (`↑`/`↓`, `enter` abre suíte com falha); `l` = **lista de testes rolável**
+  (`↑`/`↓`, `PgUp`/`PgDn`, `enter`/`o` **abre o teste no editor** em
+  arquivo:linha — decisão #22); o detalhe da falha mostra **diff + code-frame**
+  e `o` abre no editor; `--no-color`/`NO_COLOR` e `ui.theme`
+  (`auto/light/dark`) — tudo **TUI-only**, o contrato do `check` segue
+  ANSI-free e byte-idêntico.
 - **`test-reporter init`** — gera `test-reporter-config.json` com os defaults
   documentados (§8), schema-válido. **Safe-by-default**: recusa sobrescrever
   um arquivo existente sem `--force` (exit 1 + stderr acionável); stdout =
@@ -220,6 +225,34 @@ adapter, sem mudar schema/contrato.)
     *Implicação:* watch deixa de ser Vitest-only; o loop não é unit-testável
     (reentrância) → verificado por **smoke event-level** num dir real
     (streaming antes do `done` + flip de veredito ao salvar).
+22. **Lista de testes rolável + abrir no editor (2026-05-19, UX v1.1).** Nova
+    view `tests`: lista **plana, rolável e navegável por teclado** de todos os
+    testes (ordem determinística arquivo→nome, igual ao `check`), linhas mais
+    "encorpadas"/espaçadas, com `arquivo:linha:col` visível (que VS Code/iTerm
+    já tornam clicável de graça). Selecionar + `enter`/`o` **abre o teste no
+    editor** na linha certa. *Decisão de mecanismo (escolha do usuário):*
+    teclado + abrir via o editor de `ui.editor` no config (fallback `code -g`),
+    **não** captura de clique de mouse do terminal — confiável em qualquer terminal e
+    fiel ao design do Ink (mouse tracking = frágil, fora de escopo). *Como:*
+    `RawTest` ganha `line?`/`col?` (toda execução, via `includeTaskLocation`/
+    `testLocationInResults`) — **TUI-only**, os renderers do contrato ignoram
+    (e2e byte-exato segue verde). Scroll/seleção/`openRequest` na **store
+    pura** (seq monotônica, mesma disciplina do `command`/`exited`; testado);
+    `editorCommand(editor)` **puro** (testado); o spawn é o edge fino
+    best-effort. *Feedback (refino 2026-05-19):* o edge **reporta de volta**
+    via `notice` na store (`» opening <abs>` → `» opened in <cmd>` ou erro
+    acionável "set ui.editor") — nada de spawn silencioso. O caminho entregue
+    ao editor é **sempre absoluto** (`absFile` = `resolve`; o editor roda
+    detached sem cwd controlado) e o `notice` mostra o **caminho real
+    absoluto** (display relativo ao `--cwd` confundia: parecia faltar a pasta).
+    *Editor no config (2026-05-19, escolha do usuário):* a escolha do editor
+    **pertence ao `test-reporter-config.json`** — campo `ui.editor` (string,
+    default `code`; `cursor`/`windsurf`/`codium` tratados como VS Code →
+    `-g arquivo:linha:col`). **Removido** o suporte a `.env`/`$EDITOR`/
+    `$VISUAL` (e os puros `parseDotenv`/`resolveEditorEnv`): config faz mais
+    sentido que env espalhado, é a fonte única já validada por zod e
+    versionada. `editorCommand` agora recebe a string do config; `wireEditor`
+    recebe `config.ui.editor`. Sem `.env` no projeto. Testado; sem dep nova.
 
 **Propostas — confirmadas 🟢 (implementadas)**
 
@@ -263,3 +296,7 @@ núcleo/contrato prevista para nenhum deles.
   `exports`/`files`; `npm pack` instala e roda fora do repo — verificado);
   README (incl. como o Claude chama `check`); decisões 🟡 #15/#16 resolvidas
   (fora do v1). Contrato do `check` **byte-inalterado** em todo o M4.
+- **UX v1.1 — implementado e verde (100 testes):** lista de testes rolável +
+  abrir no editor (decisão #22). `RawTest.line/col` TUI-only; store pura
+  (lista/scroll/`openRequest`) + `editorCommand` puro testados; spawn = edge
+  best-effort. Contrato do `check` **byte-inalterado** (e2e verde).

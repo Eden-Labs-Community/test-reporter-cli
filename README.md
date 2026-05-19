@@ -118,14 +118,16 @@ test-reporter check --json   # exit 0/1/>1, single JSON object on stdout
   "defaultMode": "standard",
   "watch": { "followLastSaved": true },
   "summary": { "detail": "cause", "maxFailures": 50 },
-  "ui": { "autoFocusFailures": true, "theme": "auto" }
+  "ui": { "autoFocusFailures": true, "theme": "auto", "editor": "code" }
 }
 ```
 
 `runner`: `"vitest"` | `"jest"`. `summary.detail`: `"cause"` | `"list"`.
 `ui.theme`: `"auto"` | `"light"` | `"dark"` (TUI only; `NO_COLOR` and
-`--no-color` are honored). Unknown/invalid config → exit `> 1` with an
-actionable message.
+`--no-color` are honored). `ui.editor`: the command used to open a test in
+your editor from the TUI (default `"code"`; `cursor`/`windsurf`/`codium` and
+other VS Code forks, plus vim/sublime families, are recognized). Unknown/
+invalid config → exit `> 1` with an actionable message.
 
 ## Programmatic API
 

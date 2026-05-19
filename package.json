@@ -23,6 +23,8 @@
     "lint": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "pg": "tsx src/cli.ts watch --cwd playground",
+    "pg:run": "tsx src/cli.ts run --cwd playground",
     "prepublishOnly": "npm run build"
   },
   "keywords": [

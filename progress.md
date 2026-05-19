@@ -1,7 +1,7 @@
 # Progress — test-reporter-cli
 
 > Estado do projeto. **Atualizar ao fim de cada task** (ver CLAUDE.md).
-> Última atualização: **2026-05-18**.
+> Última atualização: **2026-05-19**.
 
 ## Status atual
 
@@ -16,9 +16,10 @@ editor de `ui.editor` no config — #22**; detalhe da falha com diff+code-frame
 Jest) com **streaming incremental no Jest** via reporter `.cjs` (bridge
 `globalThis`; `done` final = agregado autoritativo → contrato intacto).
 Non-TTY/`--summary`/`--json` → contrato do `check` (paridade testada).
-**94 testes verdes**, lint+build limpos, **`npm pack` instalado e rodando
-fora do repo** (verificado). Decisões 🟡 #15/#16 resolvidas (fora do v1).
-Próximo: nada pendente (release npm quando o usuário pedir).
+**94 testes verdes**, lint+build limpos. **PUBLICADO no npm:
+`eden-test-reporter-cli@1.0.0`** (tag `latest`, registry público; bump
+0.1.0→1.0.0 + commit/tag git `v1.0.0`). Decisões 🟡 #15/#16 resolvidas
+(fora do v1). Próximo: nada pendente — v1 lançado.
 
 ## Milestones
 
@@ -130,9 +131,10 @@ Próximo: nada pendente (release npm quando o usuário pedir).
 
 ## Próximo
 
-**Nada pendente para o v1.** App finalizado (ver SUCCESS_CRITERIA › STATUS).
-Release npm (`npm publish`) só quando o usuário pedir. Pós-v1 possível:
-monorepo (#15), coverage (#16), declarações `.d.ts` p/ a API.
+**Nada pendente para o v1 — LANÇADO.** `eden-test-reporter-cli@1.0.0` no npm
+(tag `latest`, https://www.npmjs.com/package/eden-test-reporter-cli). Pós-v1
+possível: monorepo (#15), coverage (#16), declarações `.d.ts` p/ a API;
+bumps de versão conforme novas mudanças.
 
 ## Critérios de sucesso
 
@@ -297,3 +299,18 @@ Status: **Globais + M1–M4 ✓ — v1 FINALIZADO + UX v1.1 (#22) ✓.**
   (config/init) ganham `editor:"code"`. Docs (PRD §8/#22, README, CLAUDE,
   SUCCESS) reconciliados. **94 verdes** (−6 = testes `.env`/env removidos),
   lint+build limpos.
+- **2026-05-19 (release npm v1.0.0):** usuário pediu publicar no npm
+  (ignorando o playground — já fora por `files:["dist"]`). Pré-voo: `build`
+  OK, **94 verdes**, `npm pack --dry-run` = 51 arquivos (só `dist/`+README+
+  `package.json`, 35.5 kB; playground confirmado fora), nome livre no
+  registry. Escolhas do usuário: **registry npm público** + **bump p/
+  1.0.0** (`npm version major` → package.json 1.0.0 + commit + tag git
+  `v1.0.0`; `dist/` é gitignored, árvore limpa). Bloqueio: token do CLI
+  expirado (`whoami` 401; npm mascara como `E404` no `PUT` do publish) — o
+  publish não chegou a pedir OTP. Usuário re-autenticou e publicou ele
+  mesmo (OTP interativo no terminal dele). Verificado ao vivo: `npm view`
+  → `version=1.0.0`, `dist-tags.latest=1.0.0`, 51 arquivos / 139292 B
+  (bate exato com o dry-run). Pacote:
+  https://www.npmjs.com/package/eden-test-reporter-cli (`npm i
+  eden-test-reporter-cli`). progress/SUCCESS atualizados (CLAUDE/PRD sem
+  mudança — release não é arquitetura nem decisão de produto).

@@ -13,10 +13,12 @@
 Todos os critérios **Globais + M1 + M2 + M3 + M4** marcados · `npm test` verde ·
 pacote instala e roda fora do repo · PRD/CLAUDE/progress/este doc coerentes.
 
-> **STATUS: ✅ FINALIZADO (v1) + UX v1.1.** Globais + M1–M4 marcados; `npm
-> test` = **100 verdes**; `npm pack` instalado e rodando fora do repo
-> (verificado); os 4 docs coerentes. Decisões 🟡 #15/#16 resolvidas (fora do
-> v1). **UX v1.1 (#22):** lista de testes rolável + abrir no editor — feito.
+> **STATUS: ✅ FINALIZADO (v1) + UX v1.1 — PUBLICADO no npm.** Globais +
+> M1–M4 marcados; `npm test` = **94 verdes** (verificado nesta sessão);
+> **`eden-test-reporter-cli@1.0.0` publicado** (npm público, tag `latest`,
+> 51 arquivos / 139.3 kB — bate com o dry-run; commit/tag git `v1.0.0`);
+> os 4 docs coerentes. Decisões 🟡 #15/#16 resolvidas (fora do v1). **UX
+> v1.1 (#22):** lista de testes rolável + abrir no editor — feito.
 
 ---
 
@@ -177,6 +179,6 @@ pacote instala e roda fora do repo · PRD/CLAUDE/progress/este doc coerentes.
   `editorCommand(editor)` **puro** testado (`editor.test.ts`); spawn
   best-effort (editor ausente → `notice` acionável "set ui.editor").
 - [x] **Contrato intato:** `RawTest.line/col` é **TUI-only**; e2e byte-exato
-  do `check` segue verde. `npm test` = **100 verdes**.
+  do `check` segue verde. `npm test` = **94 verdes**.
 - [x] Mecanismo decidido pelo usuário: **teclado + editor**, não captura de
   clique de mouse (frágil/fora do design do Ink) — registrado PRD #22.

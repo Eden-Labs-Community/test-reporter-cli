@@ -1,11 +1,10 @@
-import { Box, Text, useApp, useInput } from "ink";
+import { Box, Text, useApp, useInput, useStdout } from "ink";
 import { join } from "node:path";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 import { toPosixRelative } from "../../core/result.js";
 import type { Store } from "../../tui/createStore.js";
 import {
-  LIST_PAGE,
   type TuiState,
   buildSuiteTree,
   buildTestList,
@@ -53,14 +52,16 @@ function Overview({
   elapsed,
   watch,
   p,
+  overviewCount,
 }: {
   s: TuiState;
   tick: number;
   elapsed: number;
   watch?: boolean;
   p: Palette;
+  overviewCount: number;
 }) {
-  const recent = s.tests.slice(-8);
+  const recent = s.tests.slice(-overviewCount);
   const n = s.result.failures.length;
   const saved = relTrigger(s);
   const footer =
@@ -191,9 +192,9 @@ function SuitesView({ s, p }: { s: TuiState; p: Palette }) {
 
 function TestsView({ s, p }: { s: TuiState; p: Palette }) {
   const list = buildTestList(s.tests);
-  const offset = Math.min(s.listOffset, Math.max(0, list.length - LIST_PAGE));
-  const shown = list.slice(offset, offset + LIST_PAGE);
-  const end = Math.min(offset + LIST_PAGE, list.length);
+  const offset = Math.min(s.listOffset, Math.max(0, list.length - s.listPage));
+  const shown = list.slice(offset, offset + s.listPage);
+  const end = Math.min(offset + s.listPage, list.length);
   return (
     <Box flexDirection="column">
       <Text color={p.accent} bold>
@@ -255,8 +256,25 @@ export function App({
 }) {
   const s = useSyncExternalStore(store.subscribe, store.getState);
   const { exit } = useApp();
+  const { stdout } = useStdout();
   const [tick, setTick] = useState(0);
+  const [rows, setRows] = useState(() => stdout?.rows ?? 24);
   const startRef = useRef(Date.now());
+
+  // Sync terminal height into the store and keep rows state up to date on resize.
+  useEffect(() => {
+    const update = () => {
+      const r = stdout?.rows ?? 24;
+      setRows(r);
+      // Each test item in TestsView = name(1) + path(1) + marginBottom(1) = 3 rows.
+      // Fixed overhead: header(1) + marginTop(1) + marginTop(1) + footer(1) = 4 rows.
+      const pageSize = Math.max(3, Math.floor((r - 4) / 3));
+      store.dispatch({ type: "resize", pageSize });
+    };
+    update();
+    stdout?.on("resize", update);
+    return () => { stdout?.off("resize", update); };
+  }, [stdout]);
 
   useInput((input, key) => {
     if (input === "q" || (key.ctrl && input === "c"))
@@ -298,7 +316,14 @@ export function App({
     ) : s.view === "tests" ? (
       <TestsView s={s} p={palette} />
     ) : (
-      <Overview s={s} tick={tick} elapsed={elapsed} watch={watch} p={palette} />
+      <Overview
+        s={s}
+        tick={tick}
+        elapsed={elapsed}
+        watch={watch}
+        p={palette}
+        overviewCount={Math.max(3, rows - 7)}
+      />
     );
   // Single place for the transient editor/status notice (DRY across views).
   return (

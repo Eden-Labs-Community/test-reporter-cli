@@ -1,3 +1,5 @@
+import { resolve } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import type { RawRun, RawTest } from "../src/core/result.js";
@@ -314,7 +316,7 @@ describe("tui store — scrollable test list (M4.1)", () => {
     // failure view is auto-focused (decision #18)
     expect(s.view).toBe("failure");
     s = reduce(s, { type: "key", key: "open" });
-    expect(s.openRequest?.file).toBe(`${ROOT}/a.test.ts`);
+    expect(s.openRequest?.file).toBe(resolve(ROOT, "a.test.ts"));
     expect(s.openRequest?.seq).toBe(1);
   });
 

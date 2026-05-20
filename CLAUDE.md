@@ -60,6 +60,10 @@ runner = **só um novo adapter** (núcleo/contrato intactos).
 
 ## Princípios de desenvolvimento (obrigatórios)
 
+- **Nomes descritivos:** variáveis, funções e parâmetros devem descrever **o que
+  são ou o que fazem** — nunca abreviações opacas. Exemplos: `isWin` (não `WIN`),
+  `hasFailures` (não `hf`), `stripDuration` (não `sd`). Quem lê o código deve
+  entender a intenção sem precisar rastrear a definição.
 - **TDD-lite (red → green, minimalista):** para cada comportamento, escreva
   primeiro o **teste mínimo que falha** (red); depois o **código mínimo para
   passar** (green). Nunca pular o red; não antecipar implementação além do que

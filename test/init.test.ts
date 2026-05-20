@@ -18,6 +18,7 @@ const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const TSX = join(ROOT, "node_modules", ".bin", "tsx");
 const CLI = join(ROOT, "src", "cli.ts");
 const CONFIG = "test-reporter-config.json";
+const isWin = process.platform === "win32";
 
 const dirs: string[] = [];
 function tmp(): string {
@@ -34,6 +35,7 @@ interface Run {
 function init(cwd: string, extra: string[] = []): Run {
   const r = spawnSync(TSX, [CLI, "init", "--cwd", cwd, ...extra], {
     encoding: "utf8",
+    shell: isWin,
   });
   return { stdout: r.stdout ?? "", stderr: r.stderr ?? "", code: r.status ?? -1 };
 }

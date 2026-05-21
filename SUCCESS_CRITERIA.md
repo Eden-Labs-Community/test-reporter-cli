@@ -18,7 +18,10 @@ pacote instala e roda fora do repo · PRD/CLAUDE/progress/este doc coerentes.
 > **`eden-test-reporter-cli@1.0.0` publicado** (npm público, tag `latest`,
 > 51 arquivos / 139.3 kB — bate com o dry-run; commit/tag git `v1.0.0`);
 > os 4 docs coerentes. Decisões 🟡 #15/#16 resolvidas (fora do v1). **UX
-> v1.1 (#22):** lista de testes rolável + abrir no editor — feito.
+> v1.1 (#22):** lista de testes rolável + abrir no editor — feito. **#23
+> (lista mouse-first):** lista vira a tela padrão ao terminar, 100% mouse
+> (roda rola · clique abre no editor) + arquivo/suíte em negrito branco — feito
+> (smoke manual da TUI pendente).
 
 ---
 
@@ -166,6 +169,9 @@ pacote instala e roda fora do repo · PRD/CLAUDE/progress/este doc coerentes.
 
 ## UX v1.1 — lista de testes rolável + abrir no editor (decisão #22)
 
+> ⚠️ **A interação foi revista pela decisão #23 (lista mouse-first)** — ver a
+> seção seguinte. Os itens de teclado abaixo são registro histórico.
+
 - [x] View `tests` (`l`): lista **plana de todos os testes**, ordem
   determinística (arquivo→nome), linhas maiores/espaçadas, com
   `arquivo:linha:col` visível. *(store pura `buildTestList`; render Ink.)*
@@ -180,5 +186,25 @@ pacote instala e roda fora do repo · PRD/CLAUDE/progress/este doc coerentes.
   best-effort (editor ausente → `notice` acionável "set ui.editor").
 - [x] **Contrato intato:** `RawTest.line/col` é **TUI-only**; e2e byte-exato
   do `check` segue verde. `npm test` = **94 verdes**.
-- [x] Mecanismo decidido pelo usuário: **teclado + editor**, não captura de
-  clique de mouse (frágil/fora do design do Ink) — registrado PRD #22.
+- [x] ~~Mecanismo: **teclado + editor**, não clique de mouse~~ → **revertido
+  pela #23**: agora é **100% mouse** (a infra SGR provou-se confiável).
+
+## UX — lista de testes mouse-first (decisão #23)
+
+- [x] A **lista rolável agrupada é a tela padrão** ao **terminar** a execução
+  (sem toggle `l`); enquanto roda, segue o stream ao vivo (Overview). *(roteado
+  em `App.tsx` por fase.)*
+- [x] **Interação 100% mouse:** roda **rola** (`scroll`→`clampOffset`), **clique
+  abre o teste no editor** em arquivo:linha (`openAt`), hover **sublinha** a
+  linha. *(store pura testada; `LIST_TOP_ROW` fixo mapeia clique→linha.)*
+- [x] **Sem teclado na lista:** removidos `listFocus`, `l`, `↑`/`↓`,
+  `PgUp`/`PgDn`, `enter`/`o`. Mantidos `q`/`s`/`esc`/`n`/`p`/`a`/`f` e o `o` do
+  detalhe da falha; #18 (last-failed-wins) intacta.
+- [x] **Arquivo + suíte em negrito branco** (palette `heading`: white no
+  dark/auto; sem cor no light/`--no-color`, o negrito carrega). *(unit
+  `theme.test.ts`.)*
+- [x] **Contrato intato:** tudo TUI-only; e2e byte-exato do `check` verde.
+  `npm test` = **96 verdes**.
+- [ ] **Smoke manual (TTY real):** rolar com a roda, clicar p/ abrir no editor,
+  ver hover e o negrito-branco, validar o mapa clique→linha — **pendente**
+  (render Ink não é auto-testado).

@@ -41,10 +41,14 @@ Esses quatro devem sempre refletir a realidade atual.
   estável**. **Consumidor primário = o Claude usando como ferramenta** num loop
   agêntico (rodar → ler veredito → corrigir). **(M1 ✔)**
 - **`test-reporter init`** — scaffold do config (safe-by-default, #20). **(M4)**
-- **TUI (M4 + UX v1.1):** tema `auto/light/dark` + `--no-color`/`NO_COLOR`;
-  `s` = árvore de suítes; `l` = **lista de testes rolável**, `enter`/`o`
-  **abre o teste no editor** (arquivo:linha, #22); detalhe da falha com diff +
-  code-frame. Tudo **TUI-only** — `check` segue ANSI-free e byte-idêntico.
+- **TUI (M4 + UX v1.1 + #23):** tema `auto/light/dark` + `--no-color`/`NO_COLOR`;
+  `s` = árvore de suítes (teclado). Ao **terminar** a execução, a **lista de
+  testes rolável vira a tela padrão** (sem toggle) — **interação 100% mouse**:
+  roda **rola**, **clique abre o teste no editor** (arquivo:linha), hover
+  sublinha; arquivo+suíte em **negrito branco** (palette `heading`) p/ localizar
+  rápido. Sem cursor de teclado na lista. **Decisão #23 reverte o "teclado+sem
+  mouse" da #22.** Detalhe da falha com diff + code-frame. Tudo **TUI-only** —
+  `check` segue ANSI-free e byte-idêntico.
 
 ## Stack
 
@@ -136,17 +140,22 @@ Detalhes completos do contrato: **PRD.md §7**.
 - `src/tui/store` — **store pura** (reducer): decisão #18 (last-failed-wins),
   `n`/`p`/`esc`/`q`, `done` autoritativo; `rerun` (zera ciclo + `watchTrigger`
   RF-04), `a`/`f` → `command` (seq monotônica). **M4:** view `suites` +
-  `buildSuiteTree` (selector puro) + `treeFocus`. **UX v1.1 (#22):** view
-  `tests` + `buildTestList` (puro, ordem arquivo→nome) + `listFocus`/
-  `listOffset` (janela `LIST_PAGE`, helper `windowAround` puro) + `openRequest`
-  (seq monotônica, edge abre no editor — disciplina do `command`/`exited`);
-  `l` alterna, `↑`/`↓`/`PgUp`/`PgDn` rolam, `enter`/`o`/`open` abrem.
-  `openTarget`→`absFile` (sempre **absoluto**; editor roda detached sem cwd);
-  `notice` mostra o caminho real + o edge reporta `opened/erro` de volta
-  (input `{type:"notice"}`). Sem React. `tui/createStore` — observable.
-- `src/renderers/tui` — Ink: `App.tsx` (Overview/FailureView/SuitesView/
-  **TestsView** + `useInput`; props `watch`/`palette`); `theme.ts`
-  (`resolvePalette` **puro**); `codeframe.ts` (`codeFrame` **puro/best-effort**,
+  `buildSuiteTree` (selector puro) + `treeFocus`. **UX v1.1 + #23
+  (lista mouse-first):** `buildTestList`/`buildGroupedList` (puros, ordem
+  arquivo→nome) + `listOffset` (rolagem; `clampOffset` puro, janela `LIST_PAGE`)
+  + `openRequest` (seq monotônica, edge abre no editor — disciplina do
+  `command`/`exited`). Inputs **`scroll`** (roda) e **`openAt`** (clique → abre
+  o item por índice). **Sem `listFocus`/`l`/setas/PgUp-PgDn na lista** (100%
+  mouse). `openTarget`→`absFile` (sempre **absoluto**; editor detached sem cwd)
+  só p/ `failure`/`suites`; `requestOpenTarget` (DRY) seta `openRequest`+`notice`
+  (caminho real); edge reporta `opened/erro` (input `{type:"notice"}`). Sem
+  React. `tui/createStore` — observable.
+- `src/renderers/tui` — Ink: `App.tsx` (**Overview** stream ao rodar /
+  **TestList** mouse-first ao terminar / FailureView / SuitesView; `useInput`
+  só atalhos globais; **`useMouse`→`scroll`/`openAt`/hover**; `LIST_TOP_ROW`
+  fixo mapeia clique→linha; props `watch`/`palette`); `mouse.ts` (SGR
+  click/scroll/hover); `theme.ts` (`resolvePalette` **puro**; campo `heading` =
+  negrito-branco do cabeçalho); `codeframe.ts` (`codeFrame` **puro/best-effort**,
   nunca lança); `editor.ts` (`editorCommand` **puro**; recebe a string
   `ui.editor` do config — **sem `.env`/`$EDITOR`/`$VISUAL`**; blank → default
   `code`; VS Code & forks cursor/windsurf/codium → `-g arq:linha:col`;
@@ -173,7 +182,8 @@ Detalhes completos do contrato: **PRD.md §7**.
 - `scripts/copy-assets.mjs` — copia o `.cjs` p/ `dist/` no `build`.
 - `test/*.test.ts` unit (`runner-factory` = só seleção, **nunca** `.run()`/
   `.watch()`; `theme`, `codeframe`, `jest-watch`=`ignoredWatchPath`,
-  `editor`=`editorCommand` puro; `tui-store` cobre lista/scroll/`open`) +
+  `editor`=`editorCommand` puro; `tui-store` cobre `scroll`/`openAt`/
+  `clampOffset`/`heading`) +
   `e2e.test.ts`; `test/fixtures/*` (Vitest + `jest-*` paridade).
 - `test/init.test.ts`/`cli.test.ts` — e2e do `init` e de help/version/unknown.
 - **M1–M4 completos.** Loops watch (Vitest+Ink, Jest+`fs.watch`) e streaming

@@ -2,18 +2,65 @@ import { Box, Text, useApp, useInput, useStdout } from "ink";
 import { join } from "node:path";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 
+import type { RawTest } from "../../core/result.js";
 import { toPosixRelative } from "../../core/result.js";
 import type { Store } from "../../tui/createStore.js";
-import {
-  type TuiState,
-  buildSuiteTree,
-  buildTestList,
-} from "../../tui/store.js";
+import { type TuiState, buildGroupedList, buildSuiteTree } from "../../tui/store.js";
 import { failureBlock } from "../summary.js";
 import { codeFrame } from "./codeframe.js";
+import { useMouse } from "./mouse.js";
 import type { Palette } from "./theme.js";
 
 const SPIN = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+/** Strip the suite prefix from a full test name, leaving just the leaf title. */
+function leafName(fullName: string, suite: string | undefined): string {
+  if (!suite) return fullName;
+  const prefix = suite + " > ";
+  return fullName.startsWith(prefix) ? fullName.slice(prefix.length) : fullName;
+}
+
+/** Group a live-stream slice of tests by (file, suite) preserving arrival order. */
+type StreamGroup = { file: string; suite: string; tests: RawTest[] };
+function groupStream(tests: RawTest[]): StreamGroup[] {
+  const groups: StreamGroup[] = [];
+  let lastKey = "";
+  for (const t of tests) {
+    const key = `${t.file}\0${t.suite ?? ""}`;
+    if (key !== lastKey) {
+      groups.push({ file: t.file, suite: t.suite ?? "", tests: [] });
+      lastKey = key;
+    }
+    // groups is always non-empty here since we just pushed when key changed
+    groups[groups.length - 1]!.tests.push(t);
+  }
+  return groups;
+}
+
+/**
+ * Terminal row (1-indexed) of the test list's first item. The done-list header
+ * is a FIXED height so click→item mapping stays a simple linear offset:
+ *   row 1 headline · row 2 counters · row 3 range · row 4 blank (marginTop)
+ *   → row 5 = first item.
+ * Keep this in sync with `TestList`'s layout; nothing conditional may sit above
+ * the list (the watch indicator and `notice` live in the footer / below it).
+ */
+const LIST_TOP_ROW = 5;
+
+/** Map a 1-indexed terminal row to a grouped-list item index (every item is one
+ *  row tall). Returns undefined when the row is outside the visible window. */
+function rowToItemIndex(
+  termRow: number,
+  itemCount: number,
+  offset: number,
+  page: number,
+): number | undefined {
+  const within = termRow - LIST_TOP_ROW;
+  if (within < 0 || within >= page) return undefined;
+  const idx = offset + within;
+  return idx >= 0 && idx < itemCount ? idx : undefined;
+}
+
 const glyph = (st: string) =>
   st === "failed" ? "✗" : st === "passed" ? "✓" : "⊘";
 const hue = (p: Palette, st: string) =>
@@ -46,6 +93,9 @@ function relTrigger(s: TuiState): string | undefined {
   return tr.startsWith(pre) ? tr.slice(pre.length) : tr;
 }
 
+/** Live progress while the run is in flight: spinner + counters + a tail of the
+ *  arriving tests (arrival order). When the run finishes the main screen
+ *  switches to the scrollable `TestList`. */
 function Overview({
   s,
   tick,
@@ -62,51 +112,51 @@ function Overview({
   overviewCount: number;
 }) {
   const recent = s.tests.slice(-overviewCount);
-  const n = s.result.failures.length;
   const saved = relTrigger(s);
-  const footer =
-    s.phase === "running"
-      ? `running… · [q] quit`
-      : watch
-        ? `watching… · ${n > 0 ? "[n]/[p] inspect · " : ""}[l]ist [s]uites [a]ll [f]ailed · [q]uit`
-        : n > 0
-          ? `${n} failure(s) · [n]/[p] inspect · [l]ist [s]uites · [q] quit`
-          : "all green · [l]ist [s]uites · [q] quit";
-  const headline =
-    s.phase === "running" ? (
-      <Text color={p.warn}>{SPIN[tick % SPIN.length]} running</Text>
-    ) : n > 0 ? (
-      <Text color={p.fail} bold>
-        ✗ FAIL
-      </Text>
-    ) : (
-      <Text color={p.pass} bold>
-        ✓ PASS
-      </Text>
-    );
-
+  const groups = groupStream(recent);
   return (
     <Box flexDirection="column">
       <Text>
         <Text color={p.accent} bold>
           test-reporter{" "}
         </Text>
-        {headline}
+        <Text color={p.warn}>{SPIN[tick % SPIN.length]} running</Text>
       </Text>
       <Counters s={s} elapsed={elapsed} p={p} />
       {watch && saved !== undefined && (
         <Text color={p.accent}>↻ saved: {saved}</Text>
       )}
       <Box flexDirection="column" marginTop={1}>
-        {recent.map((t, i) => (
-          <Text key={`${t.file} ${t.name} ${i}`}>
-            <Text color={hue(p, t.status)}>{glyph(t.status)}</Text>{" "}
-            <Text dimColor={t.status !== "failed"}>{t.name}</Text>
-          </Text>
-        ))}
+        {groups.map((g) => {
+          const rel = toPosixRelative(s.rootDir, g.file);
+          return (
+            <Box key={`${g.file}\0${g.suite}`} flexDirection="column">
+              <Text>
+                <Text bold color={p.heading}>
+                  {rel}
+                </Text>
+                {g.suite ? (
+                  <Text bold color={p.heading}>
+                    {"  "}
+                    {g.suite}
+                  </Text>
+                ) : null}
+              </Text>
+              {g.tests.map((t, i) => (
+                <Text key={`${t.file} ${t.name} ${i}`}>
+                  {"  "}
+                  <Text color={hue(p, t.status)}>{glyph(t.status)}</Text>{" "}
+                  <Text dimColor={t.status !== "failed"}>
+                    {leafName(t.name, t.suite)}
+                  </Text>
+                </Text>
+              ))}
+            </Box>
+          );
+        })}
       </Box>
       <Box marginTop={1}>
-        <Text dimColor>{footer}</Text>
+        <Text dimColor>running… · [s]uites · [q]uit</Text>
       </Box>
     </Box>
   );
@@ -190,55 +240,108 @@ function SuitesView({ s, p }: { s: TuiState; p: Palette }) {
   );
 }
 
-function TestsView({ s, p }: { s: TuiState; p: Palette }) {
-  const list = buildTestList(s.tests);
-  const offset = Math.min(s.listOffset, Math.max(0, list.length - s.listPage));
-  const shown = list.slice(offset, offset + s.listPage);
-  const end = Math.min(offset + s.listPage, list.length);
+/** The finished-run main screen: a mouse-driven, scrollable list of every test
+ *  grouped by (file, suite). The wheel scrolls; a click opens that test in the
+ *  editor; hover underlines the row under the cursor. File + suite headers are
+ *  bold white (palette `heading`) so a dev can locate a test fast. No keyboard
+ *  cursor — test interaction is 100% mouse. */
+function TestList({
+  s,
+  elapsed,
+  watch,
+  p,
+  hoverIndex,
+}: {
+  s: TuiState;
+  elapsed: number;
+  watch?: boolean;
+  p: Palette;
+  hoverIndex?: number;
+}) {
+  const items = buildGroupedList(s.tests);
+  const offset = Math.min(s.listOffset, Math.max(0, items.length - s.listPage));
+  const shown = items.slice(offset, offset + s.listPage);
+  const end = Math.min(offset + s.listPage, items.length);
+  const n = s.result.failures.length;
   return (
     <Box flexDirection="column">
-      <Text color={p.accent} bold>
-        tests{" "}
-        <Text dimColor>
-          ({list.length === 0 ? 0 : offset + 1}–{end} of {list.length})
+      <Text>
+        <Text color={p.accent} bold>
+          test-reporter{" "}
         </Text>
+        {n > 0 ? (
+          <Text color={p.fail} bold>
+            ✗ FAIL
+          </Text>
+        ) : (
+          <Text color={p.pass} bold>
+            ✓ PASS
+          </Text>
+        )}
+      </Text>
+      <Counters s={s} elapsed={elapsed} p={p} />
+      <Text dimColor>
+        tests ({items.length === 0 ? 0 : offset + 1}–{end} of {items.length})
       </Text>
       <Box flexDirection="column" marginTop={1}>
-        {list.length === 0 && <Text dimColor>no tests yet…</Text>}
-        {shown.map((t, i) => {
+        {items.length === 0 && <Text dimColor>no tests…</Text>}
+        {shown.map((item, i) => {
           const idx = offset + i;
-          const sel = idx === s.listFocus;
-          const rel = toPosixRelative(s.rootDir, t.file);
-          const loc =
-            t.line === undefined
-              ? rel
-              : `${rel}:${t.line}${t.col === undefined ? "" : `:${t.col}`}`;
-          return (
-            <Box key={`${t.file} ${t.name}`} flexDirection="column" marginBottom={1}>
-              <Text>
-                <Text color={sel ? p.accent : undefined}>{sel ? "❯ " : "  "}</Text>
-                <Text color={hue(p, t.status)}>{glyph(t.status)}</Text>{" "}
-                <Text bold={sel} color={t.status === "failed" ? p.fail : undefined}>
-                  {t.name}
+          const isHovered = idx === hoverIndex;
+
+          if (item.kind === "suite-header") {
+            const rel = toPosixRelative(s.rootDir, item.file);
+            return (
+              <Text key={`h${item.file}\0${item.suite}`}>
+                <Text color={p.accent}>▸ </Text>
+                <Text bold color={p.heading} underline={isHovered}>
+                  {rel}
                 </Text>
+                {item.suite !== "" && (
+                  <Text bold color={p.heading} underline={isHovered}>
+                    {"  "}
+                    {item.suite}
+                  </Text>
+                )}
               </Text>
-              <Text dimColor>
-                {"    "}
-                {loc}
-                {t.durationMs === undefined
-                  ? ""
-                  : ` · ${Math.round(t.durationMs)}ms`}
+            );
+          }
+
+          const t = item.data;
+          const leaf = leafName(t.name, t.suite);
+          return (
+            <Text key={`t${t.file}\0${t.name}`}>
+              {"    "}
+              <Text color={hue(p, t.status)}>{glyph(t.status)}</Text>{" "}
+              <Text
+                underline={isHovered}
+                color={
+                  isHovered
+                    ? p.accent
+                    : t.status === "failed"
+                      ? p.fail
+                      : undefined
+                }
+              >
+                {leaf}
               </Text>
-            </Box>
+              {t.durationMs !== undefined && (
+                <Text dimColor>
+                  {"  · "}
+                  {Math.round(t.durationMs)}ms
+                </Text>
+              )}
+            </Text>
           );
         })}
       </Box>
       <Box marginTop={1}>
         <Text dimColor>
           {offset > 0 ? "▲ " : "  "}
-          {end < list.length ? "▼ " : "  "}
-          [↑]/[↓] scroll · [PgUp]/[PgDn] page · [enter]/[o] open in editor ·
-          [l]/[esc] back · [q] quit
+          {end < items.length ? "▼ " : "  "}
+          clique: abrir no editor · roda: rolar · [s]uites
+          {watch ? " · [a]ll [f]ailed" : ""}
+          {n > 0 ? " · [n]/[p] falhas" : ""} · [q]uit
         </Text>
       </Box>
     </Box>
@@ -261,29 +364,50 @@ export function App({
   const [rows, setRows] = useState(() => stdout?.rows ?? 24);
   const startRef = useRef(Date.now());
 
+  const [hoverRow, setHoverRow] = useState<number | undefined>(undefined);
+
   // Sync terminal height into the store and keep rows state up to date on resize.
   useEffect(() => {
     const update = () => {
       const r = stdout?.rows ?? 24;
       setRows(r);
-      // Each test item in TestsView = name(1) + path(1) + marginBottom(1) = 3 rows.
-      // Fixed overhead: header(1) + marginTop(1) + marginTop(1) + footer(1) = 4 rows.
-      const pageSize = Math.max(3, Math.floor((r - 4) / 3));
+      // Keep the whole list view inside the screen so the terminal never scrolls
+      // (which would break click→row mapping). Overhead: header(3) + marginTop(1)
+      // + footer(2) + an eventual notice(2) = 8 rows.
+      const pageSize = Math.max(3, r - 8);
       store.dispatch({ type: "resize", pageSize });
     };
     update();
     stdout?.on("resize", update);
-    return () => { stdout?.off("resize", update); };
+    return () => {
+      stdout?.off("resize", update);
+    };
   }, [stdout]);
+
+  useMouse({
+    onScrollUp: () => store.dispatch({ type: "scroll", delta: -3 }),
+    onScrollDown: () => store.dispatch({ type: "scroll", delta: 3 }),
+    onClick: (row) => {
+      // The clickable list only shows on the finished-run overview. Read fresh
+      // state from the store so the mapping never uses a stale render.
+      const st = store.getState();
+      if (st.phase !== "done" || st.view !== "overview") return;
+      const idx = rowToItemIndex(
+        row,
+        buildGroupedList(st.tests).length,
+        st.listOffset,
+        st.listPage,
+      );
+      if (idx !== undefined) store.dispatch({ type: "openAt", index: idx });
+    },
+    onHover: (row) => setHoverRow(row),
+  });
 
   useInput((input, key) => {
     if (input === "q" || (key.ctrl && input === "c"))
       store.dispatch({ type: "key", key: "q" });
     else if (input === "s") store.dispatch({ type: "key", key: "s" });
-    else if (input === "l") store.dispatch({ type: "key", key: "l" });
     else if (input === "o") store.dispatch({ type: "key", key: "open" });
-    else if (key.pageUp) store.dispatch({ type: "key", key: "pgup" });
-    else if (key.pageDown) store.dispatch({ type: "key", key: "pgdn" });
     else if (key.upArrow) store.dispatch({ type: "key", key: "up" });
     else if (key.downArrow) store.dispatch({ type: "key", key: "down" });
     else if (key.return) store.dispatch({ type: "key", key: "enter" });
@@ -308,13 +432,30 @@ export function App({
   const elapsed =
     s.phase === "done" ? s.result.durationMs : Date.now() - startRef.current;
 
+  // Hover highlight only matters on the finished-run list (the clickable view).
+  const hoverIndex =
+    s.phase === "done" && s.view === "overview" && hoverRow !== undefined
+      ? rowToItemIndex(
+          hoverRow,
+          buildGroupedList(s.tests).length,
+          s.listOffset,
+          s.listPage,
+        )
+      : undefined;
+
   const view =
     s.view === "failure" ? (
       <FailureView s={s} p={palette} />
     ) : s.view === "suites" ? (
       <SuitesView s={s} p={palette} />
-    ) : s.view === "tests" ? (
-      <TestsView s={s} p={palette} />
+    ) : s.phase === "done" ? (
+      <TestList
+        s={s}
+        elapsed={elapsed}
+        watch={watch}
+        p={palette}
+        hoverIndex={hoverIndex}
+      />
     ) : (
       <Overview
         s={s}

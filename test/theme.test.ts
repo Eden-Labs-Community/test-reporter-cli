@@ -26,6 +26,16 @@ describe("resolvePalette", () => {
     expect(p.accent).toBeUndefined();
   });
 
+  it("heading is white on dark/auto, dropped on light and in mono", () => {
+    expect(resolvePalette({ theme: "dark", env: {} }).heading).toBe("white");
+    expect(resolvePalette({ theme: "auto", env: {} }).heading).toBe("white");
+    // white washes out on a light background → no hue, bold carries the emphasis
+    expect(resolvePalette({ theme: "light", env: {} }).heading).toBeUndefined();
+    expect(
+      resolvePalette({ theme: "dark", noColor: true, env: {} }).heading,
+    ).toBeUndefined();
+  });
+
   it("honors the NO_COLOR env var even without the flag", () => {
     expect(resolvePalette({ theme: "dark", env: { NO_COLOR: "1" } }).mono).toBe(
       true,

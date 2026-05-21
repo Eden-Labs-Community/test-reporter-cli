@@ -146,13 +146,15 @@ sem `.env`/`$EDITOR`/`$VISUAL`.)
   as falhas, `n`/`p`/`esc`/`s` como no `run`, `q`/Ctrl-C encerra limpo.
   Non-TTY / CI / `--summary` / `--json` → 1 execução = contrato do `check`.
   **(M3 ✔ · Jest watch M4 ✔)**
-- **Teclas/UX comuns (M4 + UX v1.1):** `s` = **árvore de suítes** navegável
-  (`↑`/`↓`, `enter` abre suíte com falha); `l` = **lista de testes rolável**
-  (`↑`/`↓`, `PgUp`/`PgDn`, `enter`/`o` **abre o teste no editor** em
-  arquivo:linha — decisão #22); o detalhe da falha mostra **diff + code-frame**
-  e `o` abre no editor; `--no-color`/`NO_COLOR` e `ui.theme`
-  (`auto/light/dark`) — tudo **TUI-only**, o contrato do `check` segue
-  ANSI-free e byte-idêntico.
+- **Teclas/UX comuns (M4 + UX v1.1 + #23):** `s` = **árvore de suítes** navegável
+  por teclado (`↑`/`↓`, `enter` abre suíte com falha). Ao **terminar** a
+  execução, a **lista de testes rolável é a tela padrão** e é **100% mouse**:
+  roda **rola**, **clique abre o teste no editor** em arquivo:linha, hover
+  sublinha a linha; arquivo+suíte em **negrito branco**; **sem navegação por
+  teclado na lista** (decisão #23, que reverte o teclado da #22). O detalhe da
+  falha mostra **diff + code-frame** e `o` abre no editor; `--no-color`/
+  `NO_COLOR` e `ui.theme` (`auto/light/dark`) — tudo **TUI-only**, o contrato
+  do `check` segue ANSI-free e byte-idêntico.
 - **`test-reporter init`** — gera `test-reporter-config.json` com os defaults
   documentados (§8), schema-válido. **Safe-by-default**: recusa sobrescrever
   um arquivo existente sem `--force` (exit 1 + stderr acionável); stdout =
@@ -253,6 +255,27 @@ sem `.env`/`$EDITOR`/`$VISUAL`.)
     sentido que env espalhado, é a fonte única já validada por zod e
     versionada. `editorCommand` agora recebe a string do config; `wireEditor`
     recebe `config.ui.editor`. Sem `.env` no projeto. Testado; sem dep nova.
+23. **Lista mouse-first — reverte o mecanismo da #22 (2026-05-21, escolha do
+    usuário).** O usuário pediu o **oposto** da #22: a lista de testes não fica
+    mais atrás de um toggle (`l`) nem é navegada por teclado. Agora, ao
+    **terminar** a execução, a **lista rolável agrupada é a tela padrão** e a
+    interação com os testes é **100% mouse**: a **roda rola** (`scroll` →
+    `clampOffset`), o **clique abre o teste no editor** em arquivo:linha
+    (`openAt`), o hover **sublinha** a linha; **arquivo + suíte** ficam em
+    **negrito branco** (palette `heading`, só dark/auto; light/`--no-color` caem
+    p/ negrito sem cor) p/ localização rápida. *Removidos* da lista: `listFocus`,
+    a tecla `l`, `↑`/`↓`/`PgUp`/`PgDn` e `enter`/`o` (abrir = clique).
+    *Mantidos por teclado:* `q`, `s`, `esc`, `n`/`p`, `a`/`f` (watch) e o `o` no
+    detalhe da falha — a #18 (last-failed-wins) segue intacta. *Como:* store
+    pura ganha inputs `scroll`/`openAt` + `clampOffset`; `App.tsx` roteia
+    **Overview (stream) ao rodar** → **TestList (mouse) ao terminar**; `useMouse`
+    (SGR) → `scroll`/`openAt`/hover; `LIST_TOP_ROW` **fixo** mapeia clique→linha
+    (cabeçalho de altura fixa). *Por que a #22 dizia "sem mouse":* na época o
+    mouse tracking foi julgado frágil/fora do Ink — a infra SGR já existe e
+    funciona no terminal do usuário, então a restrição caiu. *Risco aceito:*
+    terminal sem suporte a mouse fica sem rolagem (sem fallback de teclado, a
+    pedido). Contrato do `check` **byte-inalterado** (tudo TUI-only); **96
+    testes verdes**.
 
 **Propostas — confirmadas 🟢 (implementadas)**
 
@@ -296,7 +319,12 @@ núcleo/contrato prevista para nenhum deles.
   `exports`/`files`; `npm pack` instala e roda fora do repo — verificado);
   README (incl. como o Claude chama `check`); decisões 🟡 #15/#16 resolvidas
   (fora do v1). Contrato do `check` **byte-inalterado** em todo o M4.
-- **UX v1.1 — implementado e verde (100 testes):** lista de testes rolável +
-  abrir no editor (decisão #22). `RawTest.line/col` TUI-only; store pura
-  (lista/scroll/`openRequest`) + `editorCommand` puro testados; spawn = edge
-  best-effort. Contrato do `check` **byte-inalterado** (e2e verde).
+- **UX v1.1 — implementado e verde:** lista de testes rolável + abrir no editor
+  (decisão #22). `RawTest.line/col` TUI-only; store pura + `editorCommand` puro
+  testados; spawn = edge best-effort. Contrato do `check` **byte-inalterado**.
+- **#23 — lista mouse-first (96 testes):** a #22 foi **revertida** do "teclado +
+  sem mouse" para **100% mouse**: a lista rolável vira a **tela padrão** ao
+  terminar (sem toggle `l`), roda **rola** (`scroll`), **clique abre no editor**
+  (`openAt`), arquivo+suíte em **negrito branco** (palette `heading`); removidos
+  `listFocus`/`l`/setas/PgUp-PgDn. Store pura (`scroll`/`openAt`/`clampOffset`)
+  testada; contrato do `check` **byte-inalterado** (e2e verde).

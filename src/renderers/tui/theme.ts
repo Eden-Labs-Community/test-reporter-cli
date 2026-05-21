@@ -14,6 +14,9 @@ export interface Palette {
   skip: string | undefined;
   accent: string | undefined;
   warn: string | undefined;
+  /** Emphasis for the test list's file/suite headers ("bold white"). White on
+   *  dark/auto; dropped on light (washes out) and mono — bold carries it there. */
+  heading: string | undefined;
 }
 
 export interface PaletteOptions {
@@ -31,6 +34,7 @@ const MONO: Palette = {
   skip: undefined,
   accent: undefined,
   warn: undefined,
+  heading: undefined,
 };
 
 // Dark = terminal default (also `auto`). Light swaps the accent to a hue that
@@ -42,8 +46,15 @@ const DARK: Palette = {
   skip: "gray",
   accent: "cyan",
   warn: "yellow",
+  heading: "white",
 };
-const LIGHT: Palette = { ...DARK, accent: "blue", warn: "magenta" };
+// White headings wash out on a light background → drop the hue, keep bold.
+const LIGHT: Palette = {
+  ...DARK,
+  accent: "blue",
+  warn: "magenta",
+  heading: undefined,
+};
 
 /** Pure: pick the TUI palette from theme + color suppression. */
 export function resolvePalette(o: PaletteOptions): Palette {

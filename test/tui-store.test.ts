@@ -202,7 +202,7 @@ describe("tui store — suite tree (M4)", () => {
     expect(s.view).toBe("overview");
   });
 
-  it("enter on a failing suite jumps to its first failure; no-op on a green suite", () => {
+  it("enter on a failing suite jumps to its first failure; enter on a green suite returns to the list at its header", () => {
     let s = initState(ROOT);
     s = feed(
       s,
@@ -212,8 +212,10 @@ describe("tui store — suite tree (M4)", () => {
     // failure stole focus → go to suites and select the green suite (idx 0)
     s = reduce(s, { type: "key", key: "s" });
     expect(s.view).toBe("suites");
-    s = reduce(s, { type: "key", key: "enter" }); // green suite → no-op
-    expect(s.view).toBe("suites");
+    s = reduce(s, { type: "key", key: "enter" }); // green suite → back to the list at its header
+    expect(s.view).toBe("overview");
+    expect(s.listOffset).toBe(0); // suite header for a.test.ts/A is the first grouped item
+    s = reduce(s, { type: "key", key: "s" }); // back to suites
     s = reduce(s, { type: "key", key: "down" }); // select b.test.ts/B
     s = reduce(s, { type: "key", key: "enter" });
     expect(s.view).toBe("failure");
@@ -231,7 +233,7 @@ describe("tui store — suite tree (M4)", () => {
   });
 });
 
-describe("tui store — scrollable test list (M4.1)", () => {
+describe("tui store — scrollable test list (mouse-first)", () => {
   const lt = (
     file: string,
     name: string,
@@ -252,62 +254,68 @@ describe("tui store — scrollable test list (M4.1)", () => {
     ]);
   });
 
-  it("l toggles the list view; up/down move + scroll the window", () => {
+  it("scroll moves the offset by the wheel delta and clamps at both ends", () => {
+    let s = initState(ROOT);
+    // one suite header + (LIST_PAGE + 5) tests → grouped length = LIST_PAGE + 6
+    const many = Array.from({ length: LIST_PAGE + 5 }, (_, i) =>
+      lt("a.test.ts", `t${String(i).padStart(2, "0")}`, "passed", i + 1),
+    );
+    s = feed(s, ...many);
+    const maxOffset = LIST_PAGE + 6 - LIST_PAGE; // grouped length − page = 6
+    expect(s.listOffset).toBe(0);
+    s = reduce(s, { type: "scroll", delta: 3 });
+    expect(s.listOffset).toBe(3);
+    s = reduce(s, { type: "scroll", delta: 100 }); // clamp at the bottom
+    expect(s.listOffset).toBe(maxOffset);
+    s = reduce(s, { type: "scroll", delta: -100 }); // clamp at the top
+    expect(s.listOffset).toBe(0);
+  });
+
+  it("resize re-clamps the offset to the new page size", () => {
     let s = initState(ROOT);
     const many = Array.from({ length: LIST_PAGE + 5 }, (_, i) =>
       lt("a.test.ts", `t${String(i).padStart(2, "0")}`, "passed", i + 1),
     );
     s = feed(s, ...many);
-    s = reduce(s, { type: "key", key: "l" });
-    expect(s.view).toBe("tests");
-    expect(s.listFocus).toBe(0);
+    s = reduce(s, { type: "scroll", delta: 100 }); // offset pinned at the bottom (6)
+    expect(s.listOffset).toBe(6);
+    // grow the viewport so the whole list fits → offset must clamp back to 0
+    s = reduce(s, { type: "resize", pageSize: LIST_PAGE + 20 });
+    expect(s.listPage).toBe(LIST_PAGE + 20);
     expect(s.listOffset).toBe(0);
-    s = reduce(s, { type: "key", key: "up" }); // clamp at top
-    expect(s.listFocus).toBe(0);
-    for (let i = 0; i < LIST_PAGE; i++) s = reduce(s, { type: "key", key: "down" });
-    expect(s.listFocus).toBe(LIST_PAGE);
-    expect(s.listOffset).toBe(1); // window scrolled to keep focus visible
-    s = reduce(s, { type: "key", key: "l" }); // toggle back
-    expect(s.view).toBe("overview");
   });
 
-  it("pgdn/pgup jump by a page and clamp at the ends", () => {
-    let s = initState(ROOT);
-    const many = Array.from({ length: LIST_PAGE * 3 }, (_, i) =>
-      lt("a.test.ts", `t${String(i).padStart(2, "0")}`, "passed", i + 1),
-    );
-    s = feed(s, ...many);
-    s = reduce(s, { type: "key", key: "l" });
-    s = reduce(s, { type: "key", key: "pgdn" });
-    expect(s.listFocus).toBe(LIST_PAGE);
-    s = reduce(s, { type: "key", key: "pgup" });
-    expect(s.listFocus).toBe(0);
-    for (let i = 0; i < 10; i++) s = reduce(s, { type: "key", key: "pgdn" });
-    expect(s.listFocus).toBe(LIST_PAGE * 3 - 1); // clamped at last
-  });
-
-  it("o/enter request opening the focused test at file:line (monotonic seq)", () => {
+  it("openAt opens the clicked test at file:line; a suite header opens just the file (monotonic seq)", () => {
     let s = initState(ROOT);
     s = feed(
       s,
       lt("a.test.ts", "first", "passed", 4),
       lt("b.test.ts", "second", "failed", 9),
     );
-    s = reduce(s, { type: "key", key: "l" });
+    // grouped: [header(a,0), test-first(1), header(b,2), test-second(3)]
     expect(s.openRequest).toBeUndefined();
-    s = reduce(s, { type: "key", key: "open" });
+    s = reduce(s, { type: "openAt", index: 1 }); // test: first, line 4
     expect(s.openRequest).toMatchObject({
       file: `${ROOT}/a.test.ts`,
       line: 4,
       seq: 1,
     });
-    s = reduce(s, { type: "key", key: "down" });
-    s = reduce(s, { type: "key", key: "enter" }); // enter == open in list view
+    s = reduce(s, { type: "openAt", index: 2 }); // suite header for b.test.ts → file only
+    expect(s.openRequest).toMatchObject({ file: `${ROOT}/b.test.ts`, seq: 2 });
+    expect(s.openRequest?.line).toBeUndefined();
+    s = reduce(s, { type: "openAt", index: 3 }); // test: second, line 9
     expect(s.openRequest).toMatchObject({
       file: `${ROOT}/b.test.ts`,
       line: 9,
-      seq: 2,
+      seq: 3,
     });
+  });
+
+  it("openAt with an out-of-range index is a no-op", () => {
+    let s = initState(ROOT);
+    s = feed(s, lt("a.test.ts", "x", "passed", 7));
+    s = reduce(s, { type: "openAt", index: 99 });
+    expect(s.openRequest).toBeUndefined();
   });
 
   it("open from the failure view targets the failing file:line (abs path)", () => {
@@ -320,25 +328,26 @@ describe("tui store — scrollable test list (M4.1)", () => {
     expect(s.openRequest?.seq).toBe(1);
   });
 
-  it("open sets an optimistic notice; a notice input overrides it", () => {
+  it("openAt sets an optimistic notice; a notice input overrides it", () => {
     let s = initState(ROOT);
     s = feed(s, lt("a.test.ts", "x", "passed", 7));
-    s = reduce(s, { type: "key", key: "l" });
-    s = reduce(s, { type: "key", key: "open" });
+    // grouped: [header(0), test(1)] — click the test to get file:line in the notice
+    s = reduce(s, { type: "openAt", index: 1 });
     expect(s.notice).toContain("a.test.ts");
     expect(s.notice).toContain("7");
     s = reduce(s, { type: "notice", text: "could not open editor" });
     expect(s.notice).toBe("could not open editor");
   });
 
-  it("rerun resets list focus/scroll", () => {
+  it("rerun resets the list scroll offset", () => {
     let s = initState(ROOT);
-    s = feed(s, lt("a.test.ts", "x", "passed", 1), lt("a.test.ts", "y", "passed", 2));
-    s = reduce(s, { type: "key", key: "l" });
-    s = reduce(s, { type: "key", key: "down" });
-    expect(s.listFocus).toBe(1);
+    const many = Array.from({ length: LIST_PAGE + 5 }, (_, i) =>
+      lt("a.test.ts", `t${String(i).padStart(2, "0")}`, "passed", i + 1),
+    );
+    s = feed(s, ...many);
+    s = reduce(s, { type: "scroll", delta: 5 });
+    expect(s.listOffset).toBeGreaterThan(0);
     s = reduce(s, { type: "rerun", trigger: `${ROOT}/a.test.ts` });
-    expect(s.listFocus).toBe(0);
     expect(s.listOffset).toBe(0);
   });
 });

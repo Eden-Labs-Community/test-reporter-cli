@@ -20,7 +20,7 @@ import { resolvePalette } from "./theme.js";
 // the alternate screen ourselves with raw ANSI sequences.
 const ENTER_ALT_SCREEN = "\x1b[?1049h\x1b[2J\x1b[H";
 // Exit alternate screen, restore cursor visibility, and reset all attributes.
-const EXIT_ALT_SCREEN = "\x1b[?1049l\x1b[?25h\x1b[0m";
+const EXIT_ALT_SCREEN = "\x1b[?1006l\x1b[?1003l\x1b[?1000l\x1b[?1049l\x1b[?25h\x1b[0m";
 
 /**
  * Switch to the alternate screen buffer and register cleanup handlers so the

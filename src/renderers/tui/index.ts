@@ -15,6 +15,41 @@ import { App } from "./App.js";
 import { editorCommand } from "./editor.js";
 import { resolvePalette } from "./theme.js";
 
+// Enter alternate screen buffer, clear it, and move cursor to home position.
+// This version of Ink (v5) does not expose an altScreen option, so we manage
+// the alternate screen ourselves with raw ANSI sequences.
+const ENTER_ALT_SCREEN = "\x1b[?1049h\x1b[2J\x1b[H";
+// Exit alternate screen, restore cursor visibility, and reset all attributes.
+const EXIT_ALT_SCREEN = "\x1b[?1049l\x1b[?25h\x1b[0m";
+
+/**
+ * Switch to the alternate screen buffer and register cleanup handlers so the
+ * terminal is always restored to a clean state even when the process is killed
+ * externally (SIGTERM, IDE stop button).
+ *
+ * - `exit` listener: writes EXIT_ALT_SCREEN as a last-resort fallback
+ *   (synchronous, runs on any exit path).
+ * - `SIGTERM` listener: unmounts Ink cleanly and exits with code 0 so the
+ *   `exit` handler above runs in order.
+ *
+ * Returns an unregister function to call after a normal exit so we don't
+ * leave stale listeners.
+ */
+function enterAltScreenAndGuard(ink: ReturnType<typeof render>): () => void {
+  process.stdout.write(ENTER_ALT_SCREEN);
+  const restoreTerminal = () => process.stdout.write(EXIT_ALT_SCREEN);
+  const onSigterm = () => {
+    ink.unmount();
+    process.exit(0);
+  };
+  process.once("exit", restoreTerminal);
+  process.once("SIGTERM", onSigterm);
+  return () => {
+    process.off("exit", restoreTerminal);
+    process.off("SIGTERM", onSigterm);
+  };
+}
+
 /**
  * Edge effect: open the focused test/failure in the user's editor when the
  * store's monotonic `openRequest.seq` advances (M4.1). The editor is the
@@ -73,6 +108,7 @@ export async function renderTui(
     noColor: opts.noColor,
   });
   const ink = render(createElement(App, { store, palette }));
+  const unguard = enterAltScreenAndGuard(ink);
   const unwire = wireEditor(store, config.ui.editor);
 
   let fatal: Error | undefined;
@@ -84,6 +120,7 @@ export async function renderTui(
   );
 
   await ink.waitUntilExit();
+  unguard();
   unwire();
   await runP;
 
@@ -113,6 +150,7 @@ export async function renderWatchTui(
     noColor: opts.noColor,
   });
   const ink = render(createElement(App, { store, watch: true, palette }));
+  const unguard = enterAltScreenAndGuard(ink);
 
   let fatal: Error | undefined;
   let handle: WatchHandle | undefined;
@@ -135,6 +173,7 @@ export async function renderWatchTui(
   const unwire = wireEditor(store, config.ui.editor);
 
   await ink.waitUntilExit(); // resolves when the store signals exit (`q`/Ctrl-C)
+  unguard();
   unsub();
   unwire();
   if (handle) await handle.close(); // clean teardown — no leaked watcher

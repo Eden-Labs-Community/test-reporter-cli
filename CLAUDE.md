@@ -28,39 +28,45 @@ Esses quatro devem sempre refletir a realidade atual.
 
 `test-reporter-cli`: CLI de relatório de testes — **`run`/`watch`/`check`**
 (+ `init`) e **dois públicos distintos** (dev na TUI · Claude no `check`).
-**M1–M4 verdes + UX v1.1 (100 testes); pacote publicável.**
+**v2.0.1 publicada (`eden-test-reporter-cli`); 98 verdes.**
 
-- **`test-reporter run`** — TUI (Ink) bonita e ao vivo, para devs; comando
-  default. Foca a falha no instante em que acontece (decisão #18). Non-TTY/CI/
-  `--summary`/`--json` → cai no contrato do `check`. UX flagship. **(M2 ✔)**
+- **`test-reporter run`** — TUI (blessed) bonita e ao vivo, para devs; comando
+  default. Non-TTY/CI/`--summary`/`--json` → cai no contrato do `check`. UX
+  flagship. **(M2 ✔)**
 - **`test-reporter watch`** — mesma TUI, re-rodando ao salvar. **Vitest:**
   watcher nativo (testes relacionados, #19). **Jest:** `fs.watch` + re-run da
-  suíte reusando o `run` 1-shot (#21). UI foca a suíte do **último salvo**
-  (RF-04); `a`=tudo `f`=só falhas. Non-TTY → contrato do `check`. **(M3+M4 ✔)**
+  suíte reusando o `run` 1-shot (#21). UI mostra o **último salvo** (RF-04).
+  Non-TTY → contrato do `check`. **(M3+M4 ✔)**
 - **`test-reporter check`** — headless, determinístico, com **contrato de saída
   estável**. **Consumidor primário = o Claude usando como ferramenta** num loop
   agêntico (rodar → ler veredito → corrigir). **(M1 ✔)**
 - **`test-reporter init`** — scaffold do config (safe-by-default, #20). **(M4)**
-- **TUI (M4 + UX v1.1 + #23):** tema `auto/light/dark` + `--no-color`/`NO_COLOR`;
-  `s` = árvore de suítes (teclado). Ao **terminar** a execução, a **lista de
-  testes rolável vira a tela padrão** (sem toggle) — **interação 100% mouse**:
-  roda **rola**, **clique abre o teste no editor** (arquivo:linha), hover
-  sublinha; arquivo+suíte em **negrito branco** (palette `heading`) p/ localizar
-  rápido. Sem cursor de teclado na lista. **Decisão #23 reverte o "teclado+sem
-  mouse" da #22.** Detalhe da falha com diff + code-frame. Tudo **TUI-only** —
-  `check` segue ANSI-free e byte-idêntico.
+- **TUI v2 (blessed, mouse-only):** 3 painéis (`Summary` topo / lista no meio /
+  `stderr` no fundo). Tema `auto/light/dark` + `--no-color`/`NO_COLOR`. Lista
+  **agrupada por arquivo** (cabeçalho por grupo, sem repetir `:linha` por
+  linha), ordenada **por (arquivo alfabético, depois `line`/`col` =
+  ordem de escrita, nome como tiebreaker)** — só na TUI; `check` segue
+  alfabético no contrato.
+  Layout **adaptativo**: 0 falhas ⇒ `stderr` escondido, lista expande até o
+  fim; ≥1 falha ⇒ split 60/40 com diff + code-frame no `stderr`.
+  Interação **100% mouse**: roda **rola** a lista/stderr, **clique numa linha
+  abre o teste no editor** (`ui.editor`), **chips** `[ all ]`/`[ failed ]`/
+  `[ quit ]` na borda do Summary acionam comandos. **Ctrl-C** é a única tecla
+  amarrada (escape de segurança).
 
 ## Stack
 
-TypeScript · **ESM** · **Node ≥ 20** · **Ink** (TUI) · **commander** (args) ·
-**zod** (config). **Runner plugável**: classe abstrata `TestRunnerAdapter` +
-factory pelo campo `runner` do config. Adapters: **Vitest** (`startVitest` +
-reporter silencioso, streaming ao vivo; `watch:true` = **watcher nativo**) e
-**Jest** (`@jest/core` `runCLI`, import *lazy* / **peer opcional**; streaming
-**incremental** via reporter `.cjs` brid-eado por `globalThis`; **watch via
-`fs.watch`** re-rodando o `run` 1-shot, #21). Resultados **sempre via API
-estruturada do runner — nunca parsear stdout** do relatório humano. Adicionar
-runner = **só um novo adapter** (núcleo/contrato intactos).
+TypeScript · **ESM** · **Node ≥ 20** · **blessed** (TUI; `@types/blessed`) ·
+**commander** (args) · **zod** (config). React/Ink **não estão na stack** (a
+TUI v2 foi reescrita em blessed). **Runner plugável**: classe abstrata
+`TestRunnerAdapter` + factory pelo campo `runner` do config. Adapters:
+**Vitest** (`startVitest` + reporter silencioso, streaming ao vivo; `watch:true`
+= **watcher nativo**) e **Jest** (`@jest/core` `runCLI`, import *lazy* / **peer
+opcional**; streaming **incremental** via reporter `.cjs` brid-eado por
+`globalThis`; **watch via `fs.watch`** re-rodando o `run` 1-shot, #21).
+Resultados **sempre via API estruturada do runner — nunca parsear stdout** do
+relatório humano. Adicionar runner = **só um novo adapter** (núcleo/contrato
+intactos).
 
 ## Princípios de desenvolvimento (obrigatórios)
 
@@ -84,26 +90,26 @@ runner = **só um novo adapter** (núcleo/contrato intactos).
 - **stdout = só o veredito.** Logs/diagnóstico vão para **stderr**. Sem ANSI em non-TTY.
 - **Nunca vazio:** sucesso → `✓ PASS · …`; falha → `✗ FAIL · …` + um bloco por
   falha (`arquivo › teste` / `at arquivo:linha` / `Tipo: mensagem`).
-- **Determinístico:** mesma execução ⇒ mesmos bytes. Ordenar por (arquivo,
-  nome). Caminhos relativos POSIX à raiz.
+- **Determinístico:** mesma execução ⇒ mesmos bytes. **Falhas no `check`
+  continuam ordenadas por (arquivo, nome)**. Caminhos relativos POSIX à raiz.
 - **Exit code:** `0` tudo passou · `1` algum teste falhou · `>1` erro de
   runner/config.
 - **`--json` versionado** (`schemaVersion`).
-- **M4/UX-v1.1 não regridem o contrato:** `expected`/`actual` **e
-  `line`/`col` por teste** (modelo `RawTest`) + code-frame são **só da TUI**;
-  `summary`/`json` os ignoram → bytes inalterados. Jest streaming só liga com
-  sink (TUI); `check` não passa sink. Provado pelos e2e byte-exatos verdes.
+- **Mudanças TUI não regridem o contrato:** `expected`/`actual` **e
+  `line`/`col` por teste** (modelo `RawTest`) + code-frame + **ordem-por-linha
+  na lista** são **só da TUI**; `summary`/`json` os ignoram → bytes inalterados.
+  Jest streaming só liga com sink (TUI); `check` não passa sink. Provado pelos
+  e2e byte-exatos verdes.
 
 Detalhes completos do contrato: **PRD.md §7**.
 
-## Estrutura do código (M1–M4)
+## Estrutura do código
 
 - `src/config` — loader + zod schema/defaults (`ConfigError`); campos `runner`
   e `ui.editor` (string, default `code`) = **única fonte da escolha do editor**
   da TUI (sem `.env`/env). `defaultConfig()`/`serializeDefaultConfig()` =
-  **fonte única** dos defaults
-  (derivada do schema); o caminho "sem arquivo" do `loadConfig` e o `init`
-  consomem essa fonte (DRY — nunca divergem).
+  **fonte única** dos defaults (derivada do schema); o caminho "sem arquivo"
+  do `loadConfig` e o `init` consomem essa fonte (DRY — nunca divergem).
 - `src/core/result` — modelo normalizado + `normalize` (determinístico).
   `toPosixRelative` **exportado** (reuso na store/TUI — DRY). `Failure` tem
   `expected?`/`actual?` e `RawTest` tem `line?`/`col?` (loc. de definição de
@@ -116,6 +122,12 @@ Detalhes completos do contrato: **PRD.md §7**.
   - `vitest` — `VitestAdapter` (`startVitest` → `RawRun`; `watch:true` =
     watcher nativo, emite `rerun`/`test`/`done` por ciclo). Helpers DRY
     `collectAll`/`collectionError` (compartilhados por `run` 1-shot + watch).
+    **`watch` passa `vitestOptions.stdin = { isTTY: false }`** (stub
+    `PassThrough`) p/ Vitest **pular** seu `registerConsoleShortcuts` —
+    senão o handler de teclado dele lê o mesmo `process.stdin` que a TUI e
+    parseia as escape sequences do mouse-capture do blessed como teclas
+    (`w`/`p`/`h`/etc), o que dispara Watch Usage e o prompt "Input a single
+    project name" no meio da execução.
   - `jest` — `JestAdapter` (`@jest/core` `runCLI` *lazy* → `RawRun`).
     **Streaming incremental:** com sink, passa `reporters:[[REPORTER_PATH,{}]]`
     (`jest-stream-reporter.cjs`) + slot `globalThis` (mesmo processo,
@@ -137,33 +149,45 @@ Detalhes completos do contrato: **PRD.md §7**.
 - `src/renderers/summary` — texto PRD §7; `failureBlock` **exportado** (reuso
   na TUI — DRY).
 - `src/renderers/json` — contrato JSON versionado (`schemaVersion`).
-- `src/tui/store` — **store pura** (reducer): decisão #18 (last-failed-wins),
-  `n`/`p`/`esc`/`q`, `done` autoritativo; `rerun` (zera ciclo + `watchTrigger`
-  RF-04), `a`/`f` → `command` (seq monotônica). **M4:** view `suites` +
-  `buildSuiteTree` (selector puro) + `treeFocus`. **UX v1.1 + #23
-  (lista mouse-first):** `buildTestList`/`buildGroupedList` (puros, ordem
-  arquivo→nome) + `listOffset` (rolagem; `clampOffset` puro, janela `LIST_PAGE`)
-  + `openRequest` (seq monotônica, edge abre no editor — disciplina do
-  `command`/`exited`). Inputs **`scroll`** (roda) e **`openAt`** (clique → abre
-  o item por índice). **Sem `listFocus`/`l`/setas/PgUp-PgDn na lista** (100%
-  mouse). `openTarget`→`absFile` (sempre **absoluto**; editor detached sem cwd)
-  só p/ `failure`/`suites`; `requestOpenTarget` (DRY) seta `openRequest`+`notice`
-  (caminho real); edge reporta `opened/erro` (input `{type:"notice"}`). Sem
-  React. `tui/createStore` — observable.
-- `src/renderers/tui` — Ink: `App.tsx` (**Overview** stream ao rodar /
-  **TestList** mouse-first ao terminar / FailureView / SuitesView; `useInput`
-  só atalhos globais; **`useMouse`→`scroll`/`openAt`/hover**; `LIST_TOP_ROW`
-  fixo mapeia clique→linha; props `watch`/`palette`); `mouse.ts` (SGR
-  click/scroll/hover); `theme.ts` (`resolvePalette` **puro**; campo `heading` =
-  negrito-branco do cabeçalho); `codeframe.ts` (`codeFrame` **puro/best-effort**,
-  nunca lança); `editor.ts` (`editorCommand` **puro**; recebe a string
-  `ui.editor` do config — **sem `.env`/`$EDITOR`/`$VISUAL`**; blank → default
-  `code`; VS Code & forks cursor/windsurf/codium → `-g arq:linha:col`;
-  testado); `index.ts` `renderTui`/`renderWatchTui` (palette via tema/
-  `--no-color`; **`wireEditor(store, config.ui.editor)`** = edge DRY: spawna o
-  editor por `openRequest.seq` detached e **reporta `notice`** de volta —
-  erro acionável "set ui.editor"; `close()` sem watcher vazado). Só TTY;
-  erro → stderr + exit>1.
+- `src/tui/store` — **store pura** (reducer). Estado: `phase`/`tests`/`result`/
+  `focusedPanel`/`listFocus`/`listOffset`/`stderrOffset`/`openRequest`/`notice`/
+  `exited`/`exitCode`/`watchTrigger`/`command`. Seletores puros:
+  - `listStatus(s)` → `"passed"` ou `"failed"` (flip automático quando aparece
+    a 1ª falha; decisão derivada de `result.failed`, nunca armazenada).
+  - `buildVisibleList(s)` → testes do status atual, ordenados por
+    `(arquivo alfabético, line asc, col asc, nome)` — **ordem de escrita
+    dentro do arquivo**; só na TUI.
+  - `buildVisibleGroups(s)` → mesma lista agrupada por arquivo, com
+    `indexInList` pra mapear seleção ↔ grupo (DRY).
+  Inputs: `key` (`q`/`tab`/`up`/`down`/`pgup`/`pgdn`/`enter`/`open`/`a`/`f`)
+  · `selectListIndex` (clique → escolhe linha + leva foco pra lista) ·
+  `focusPanel` (clique num painel → toma scroll-focus) · `notice` (edge →
+  store: resultado do spawn do editor) · eventos do runner (`test`/`done`/
+  `rerun`). `openTarget`→`absFile` (sempre absoluto; editor detached sem cwd).
+  `tui/createStore` — observable.
+- `src/renderers/tui` — blessed (sem React):
+  - `index.ts` — `buildScreen` cria os 3 painéis e os **chips** `[ all ]`/
+    `[ failed ]`/`[ quit ]` na borda do Summary; `render()` desenha summary +
+    lista agrupada + stderr; **layout adaptativo** (0 falhas ⇒ `stderrBox.hide()`
+    + `listBox.bottom = 0`; ≥1 ⇒ split 60/40 com `height: "60%-5"`). `renderTui`
+    e `renderWatchTui` montam, ligam `wireEditor` (edge DRY: spawna `ui.editor`
+    detached por `openRequest.seq` e reporta `notice` de volta) e drenam runner
+    events pro store.
+  - **Mouse:** *um único* `screen.on("mouse")` com hit-testing manual
+    (`chips → list → stderr`) e **pareamento estrito mousedown↔mouseup**.
+    Necessário porque blessed faz `(mouseDown || el).emit('click', data)` em
+    todo mouseup que cair num clickable — sem pareamento, um scroll de
+    trackpad cuja gesto começa sobre um chip dispara o `click` do chip
+    quando o mouseup acaba na lista, rerodando tudo. Por isso **nenhum**
+    elemento usa `mouse:true`/`clickable:true`; `screen.enableMouse()` é
+    chamado explicitamente; wheel é roteado por posição do cursor (wheel na
+    lista move o cursor, wheel no stderr rola o offset).
+  - `theme.ts` — `resolvePalette` **puro** (mono se `--no-color`/`NO_COLOR`;
+    `auto/light/dark`).
+  - `codeframe.ts` — `codeFrame` **puro/best-effort** (nunca lança).
+  - `editor.ts` — `editorCommand` **puro**; recebe `ui.editor` do config (sem
+    `.env`/env). Blank → default `code`; VS Code & forks
+    cursor/windsurf/codium → `-g arq:linha:col`. Testado.
 - `src/commands/check` — compõe; veredito→stdout, erros→stderr.
 - `src/commands/run` — TTY → `renderTui`; headless → delega `runCheck` (DRY).
 - `src/commands/watch` — TTY → `renderWatchTui`; headless → `runCheck`
@@ -182,34 +206,37 @@ Detalhes completos do contrato: **PRD.md §7**.
 - `scripts/copy-assets.mjs` — copia o `.cjs` p/ `dist/` no `build`.
 - `test/*.test.ts` unit (`runner-factory` = só seleção, **nunca** `.run()`/
   `.watch()`; `theme`, `codeframe`, `jest-watch`=`ignoredWatchPath`,
-  `editor`=`editorCommand` puro; `tui-store` cobre `scroll`/`openAt`/
-  `clampOffset`/`heading`) +
-  `e2e.test.ts`; `test/fixtures/*` (Vitest + `jest-*` paridade).
+  `editor`=`editorCommand` puro; `tui-store` cobre flip Passed↔Failed,
+  `buildVisibleList` (ordem por arquivo→linha→col→nome), `buildVisibleGroups`
+  (DRY com `indexInList`), `selectListIndex`/`focusPanel`/`notice`,
+  watch keys) + `e2e.test.ts`; `test/fixtures/*` (Vitest + `jest-*` paridade).
 - `test/init.test.ts`/`cli.test.ts` — e2e do `init` e de help/version/unknown.
-- **M1–M4 completos.** Loops watch (Vitest+Ink, Jest+`fs.watch`) e streaming
-  incremental do Jest **não são unit-testáveis** (reentrância) → smoke
-  event-level num dir real (streaming antes do `done` + flip ao salvar).
+- **M1–M4 + TUI v2 completos.** Loops watch (Vitest, Jest+`fs.watch`),
+  streaming incremental do Jest, e o handler de mouse do blessed **não são
+  unit-testáveis** (reentrância / I/O do terminal) → smoke event-level num
+  dir real (streaming antes do `done` + flip ao salvar; mouse via uso real).
 
 ## Testes & build
 
 - **Os testes do próprio CLI são escritos em Vitest + TypeScript (ESM)** — o
   mesmo runner que o CLI integra (dogfooding; sem runner extra na stack).
 - **Unit:** módulos puros (normalização, formatters, config+zod, exit codes,
-  **store da TUI** — contadores/decisão #18/nav, **sem render Ink**; dedupe de
-  streaming `pickUnemitted` + `isTerminalState`). Sem spawn.
+  **store da TUI** — flip, ordenação por linha, seleção por clique, scroll,
+  watch; **sem render blessed**; dedupe de streaming `pickUnemitted` +
+  `isTerminalState`). Sem spawn.
 - **E2E / contrato:** `check` **e** `run` **como processo filho** contra
   *fixtures* (passa/falha/misto/config-inválida/runner-error + `jest-*`):
   stdout byte-exato, stderr, exit code. Inclui **paridade** Vitest↔Jest e
-  **`run` non-TTY ≡ `check`** (mesmos bytes/exit). O render Ink em si **não é
-  testado automaticamente** (a lógica vive na store pura, que é); smoke manual
-  sob pty se precisar ver a TUI. **`init`** roda como processo filho num
-  `tmpdir` (não inicia runner → seguro; não usa fixtures).
+  **`run` non-TTY ≡ `check`** (mesmos bytes/exit). O render blessed em si
+  **não é testado automaticamente** (a lógica vive na store pura, que é);
+  smoke manual sob pty se precisar ver a TUI. **`init`** roda como processo
+  filho num `tmpdir` (não inicia runner → seguro; não usa fixtures).
 - ⚠️ **Nunca** chamar o núcleo de dentro de um teste Vitest — ele inicia um
   runner (`startVitest`/`runCLI`); runner-dentro-de-runner = reentrância.
   Sempre processo filho. (Por isso `runner-factory.test.ts` só **constrói** o
   adapter, nunca chama `.run()`.)
 - Comandos: `npm run build` (**tsc + `copy-assets.mjs`** copia o `.cjs` p/
-  `dist/`) · `npm test` (vitest run, **100 verdes**) · `npm run lint`
+  `dist/`) · `npm test` (vitest run, **98 verdes**) · `npm run lint`
   (= `tsc --noEmit`). Não precisa buildar p/ testar — e2e roda via `tsx`
   (o `.cjs` resolve em `src/` via `import.meta.url`). Publicável verificado:
   `npm pack` instala e roda fora do repo (`bin`/shebang/`exports` OK).

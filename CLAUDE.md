@@ -132,6 +132,12 @@ Detalhes completos do contrato: **PRD.md §7**.
     parseia as escape sequences do mouse-capture do blessed como teclas
     (`w`/`p`/`h`/etc), o que dispara Watch Usage e o prompt "Input a single
     project name" no meio da execução.
+    **`onWatcherRerun(files, trigger)`** — `trigger` chega como **path
+    relativo ao root** (ex.: `"src/foo.test.ts"`), enquanto `files` são
+    paths **absolutos**. Por isso o `rerun` event passa `relatedFiles: files`
+    (lock #24 precisa de absoluto p/ casar com `t.file`); usar `trigger`
+    direto como lock causaria `relative(rootDir, "src/foo.test.ts")` =
+    `../src/foo.test.ts` quando `process.cwd() !== rootDir`.
   - `jest` — `JestAdapter` (`@jest/core` `runCLI` *lazy* → `RawRun`).
     **Streaming incremental:** com sink, passa `reporters:[[REPORTER_PATH,{}]]`
     (`jest-stream-reporter.cjs`) + slot `globalThis` (mesmo processo,
@@ -271,6 +277,13 @@ Detalhes completos do contrato: **PRD.md §7**.
   (= `tsc --noEmit`). Não precisa buildar p/ testar — e2e roda via `tsx`
   (o `.cjs` resolve em `src/` via `import.meta.url`). Publicável verificado:
   `npm pack` instala e roda fora do repo (`bin`/shebang/`exports` OK).
+- **⚠ Rebuilar antes de smoke do user:** o `bin: test-reporter` aponta p/
+  `dist/cli.js`; se o user roda `test-reporter watch` (pacote linkado/
+  instalado, ou `node dist/cli.js`), ele pega o **dist**, **não o source**.
+  Fix em `src/` que passou no `npm test` mas sem `npm run build` = user
+  ainda vê o bug. Sempre rodar `npm run build` antes de pedir p/ ele
+  re-testar (regra aprendida quando o smoke do #24 viu o código antigo do
+  lock por causa de dist stale).
 - Determinismo: a duração (`<n>s`) é runtime; os testes e2e a **normalizam**
   antes de comparar bytes. O contrato é determinístico módulo duração.
 - `line/col` = local da **definição do teste** (Vitest `includeTaskLocation`,

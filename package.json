@@ -1,6 +1,6 @@
 {
   "name": "eden-test-reporter-cli",
-  "version": "2.0.1",
+  "version": "2.1.0",
   "description": "CLI test reporter: pretty live TUI for devs (`run`) + a headless, deterministic, agent-friendly verdict (`check`).",
   "type": "module",
   "bin": {

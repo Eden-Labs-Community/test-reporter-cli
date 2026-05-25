@@ -21,7 +21,7 @@ function cli(...args: string[]): Run {
   const r = spawnSync(TSX, [CLI, ...args], { encoding: "utf8", shell: isWin });
   return { stdout: r.stdout ?? "", stderr: r.stderr ?? "", code: r.status ?? -1 };
 }
-
+ 
 const T = 20_000;
 
 describe("cli help/version (e2e)", () => {

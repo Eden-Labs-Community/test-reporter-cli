@@ -89,25 +89,33 @@ export function listStatus(s: TuiState): "passed" | "failed" {
 }
 
 /**
- * Pure selector: the testimony shown in the middle box — passed tests while
- * all green, failed tests once any fail. Deterministic (file, name) order,
- * same discipline as the `check` failure ordering.
+ * Pure selector: tests shown in the middle box — passed while all green,
+ * failed once any fail. Ordering:
+ *
+ *   1. by file (alphabetical, so the groups are predictable);
+ *   2. within a file, by **source order** (`line` then `col`), so a test
+ *      written first appears first — what the user expects when scanning a
+ *      file in the editor. Tests without a location fall back to name.
+ *
+ * Source order (decision 2026-05-25) intentionally diverges from the `check`
+ * contract's alphabetical sort: this is TUI-only and `check` byte output is
+ * unaffected (renderers there ignore `line`/`col`).
  */
 export function buildVisibleList(s: TuiState): RawTest[] {
   const want = listStatus(s); // "passed" | "failed"
   return s.tests
     .filter((t) => t.status === want)
-    .sort((a, b) =>
-      a.file !== b.file
-        ? a.file < b.file
-          ? -1
-          : 1
-        : a.name < b.name
-          ? -1
-          : a.name > b.name
-            ? 1
-            : 0,
-    );
+    .sort((a, b) => {
+      if (a.file !== b.file) return a.file < b.file ? -1 : 1;
+      const al = a.line ?? Number.POSITIVE_INFINITY;
+      const bl = b.line ?? Number.POSITIVE_INFINITY;
+      if (al !== bl) return al - bl;
+      const ac = a.col ?? 0;
+      const bc = b.col ?? 0;
+      if (ac !== bc) return ac - bc;
+      // Fall back to name when locations are absent or tied (e.g. test.each).
+      return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
+    });
 }
 
 /** Visible list grouped by file. File order matches `buildVisibleList` (sorted),

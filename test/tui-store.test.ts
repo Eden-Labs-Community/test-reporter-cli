@@ -63,6 +63,41 @@ describe("tui store — list status flip (Passed ↔ Failed)", () => {
     expect(buildVisibleList(s).map((x) => x.name)).toEqual(["a-fail", "z-fail"]);
   });
 
+  it("buildVisibleList orders tests within a file by source order (line, col), not alphabetically", () => {
+    let s = initState(ROOT);
+    // Insert deliberately out of order: name-alphabetical would yield
+    // [Olamundo, includes, interpolates]; source order should yield
+    // [interpolates, includes, Olamundo] because of the lines.
+    s = feed(
+      s,
+      t("strings.test.ts", "strings > template > Olamundo", "passed", undefined, 11),
+      t("strings.test.ts", "strings > template > interpolates", "passed", undefined, 9),
+      t("strings.test.ts", "strings > template > includes", "passed", undefined, 10),
+    );
+    expect(buildVisibleList(s).map((x) => x.name)).toEqual([
+      "strings > template > interpolates",
+      "strings > template > includes",
+      "strings > template > Olamundo",
+    ]);
+  });
+
+  it("buildVisibleList falls back to name when line is missing or tied (deterministic)", () => {
+    let s = initState(ROOT);
+    // Mix: one without line, one with — the missing-line one sorts last
+    // (POSITIVE_INFINITY). Among same-line tests, name breaks the tie.
+    s = feed(
+      s,
+      t("a.test.ts", "zeta", "passed", undefined, 5),
+      t("a.test.ts", "alpha-no-line", "passed"),
+      t("a.test.ts", "beta", "passed", undefined, 5),
+    );
+    expect(buildVisibleList(s).map((x) => x.name)).toEqual([
+      "beta", // line 5, name < "zeta"
+      "zeta", // line 5
+      "alpha-no-line", // no line → sorted last
+    ]);
+  });
+
   it("buildVisibleGroups groups by file in flat-list order, preserving listFocus index", () => {
     let s = initState(ROOT);
     s = feed(

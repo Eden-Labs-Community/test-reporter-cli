@@ -10,6 +10,7 @@ const CLI = join(ROOT, "src", "cli.ts");
 const PKG_VERSION = JSON.parse(
   readFileSync(join(ROOT, "package.json"), "utf8"),
 ).version as string;
+const isWin = process.platform === "win32";
 
 interface Run {
   stdout: string;
@@ -17,7 +18,7 @@ interface Run {
   code: number;
 }
 function cli(...args: string[]): Run {
-  const r = spawnSync(TSX, [CLI, ...args], { encoding: "utf8" });
+  const r = spawnSync(TSX, [CLI, ...args], { encoding: "utf8", shell: isWin });
   return { stdout: r.stdout ?? "", stderr: r.stderr ?? "", code: r.status ?? -1 };
 }
 

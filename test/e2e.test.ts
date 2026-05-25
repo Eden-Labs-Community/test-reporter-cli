@@ -9,6 +9,7 @@ const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const TSX = join(ROOT, "node_modules", ".bin", "tsx");
 const CLI = join(ROOT, "src", "cli.ts");
 const fixture = (name: string) => join(ROOT, "test", "fixtures", name);
+const isWin = process.platform === "win32";
 
 interface Run {
   stdout: string;
@@ -23,7 +24,7 @@ function cli(
   const r = spawnSync(
     TSX,
     [CLI, cmd, "--cwd", fixture(fixtureName), ...extra],
-    { encoding: "utf8" },
+    { encoding: "utf8", shell: isWin },
   );
   return { stdout: r.stdout ?? "", stderr: r.stderr ?? "", code: r.status ?? -1 };
 }

@@ -1,3 +1,5 @@
+import { resolve } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import type { RawRun, RawTest } from "../src/core/result.js";
@@ -360,7 +362,7 @@ describe("tui store — lifecycle (done/rerun/notice)", () => {
     expect(s.command).toEqual({ kind: "all", seq: 3 });
   });
 
-  it("open sets an optimistic notice; a notice input overrides it", () => {
+  it("openAt sets an optimistic notice; a notice input overrides it", () => {
     let s = initState(ROOT);
     s = feed(s, t("a.test.ts", "p", "passed", undefined, 7));
     s = reduce(s, { type: "key", key: "open" });

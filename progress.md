@@ -1,22 +1,23 @@
 # Progress — test-reporter-cli
 
 > Estado do projeto. **Atualizar ao fim de cada task** (ver CLAUDE.md).
-> Última atualização: **2026-05-19**.
+> Última atualização: **2026-05-21**.
 
 ## Status atual
 
 **M1–M4 verdes — v1 FINALIZADO + UX v1.1; pacote publicável.** `check`
 headless determinístico (consumidor primário = Claude) + **`run`/`watch` TUI
 Ink ao vivo** (decisão #18; tema `auto/light/dark` + `--no-color`/`NO_COLOR`;
-`s` = árvore de suítes; **`l` = lista de testes rolável, `enter`/`o` abre no
-editor de `ui.editor` no config — #22**; detalhe da falha com diff+code-frame
-— tudo TUI-only) +
+`s` = árvore de suítes; **lista de testes mouse-first é a tela padrão ao
+terminar — roda rola, clique abre no editor (`ui.editor`), arquivo+suíte em
+negrito branco (#23, reverte o teclado da #22)**; detalhe da falha com
+diff+code-frame — tudo TUI-only) +
 **`init`** (safe-by-default, #20). **Watch:** Vitest = watcher nativo (#19);
 **Jest = `fs.watch` + re-run da suíte (#21)**. **Runner plugável** (Vitest/
 Jest) com **streaming incremental no Jest** via reporter `.cjs` (bridge
 `globalThis`; `done` final = agregado autoritativo → contrato intacto).
 Non-TTY/`--summary`/`--json` → contrato do `check` (paridade testada).
-**94 testes verdes**, lint+build limpos. **PUBLICADO no npm:
+**96 testes verdes**, lint+build limpos. **PUBLICADO no npm:
 `eden-test-reporter-cli@1.0.0`** (tag `latest`, registry público; bump
 0.1.0→1.0.0 + commit/tag git `v1.0.0`). Decisões 🟡 #15/#16 resolvidas
 (fora do v1). Próximo: nada pendente — v1 lançado.
@@ -314,3 +315,21 @@ Status: **Globais + M1–M4 ✓ — v1 FINALIZADO + UX v1.1 (#22) ✓.**
   https://www.npmjs.com/package/eden-test-reporter-cli (`npm i
   eden-test-reporter-cli`). progress/SUCCESS atualizados (CLAUDE/PRD sem
   mudança — release não é arquitetura nem decisão de produto).
+- **2026-05-21 (#23 — lista de testes mouse-first; reverte o teclado da #22):**
+  usuário pediu o **oposto** da #22 — sem o modo `l`, sem navegação/seleção de
+  teste por teclado; **100% mouse**. Decisões confirmadas (via perguntas):
+  (1) **clique abre no editor** (qualquer teste); (2) **stream ao rodar, lista
+  ao terminar**; (3) **remover** todo o teclado da lista (sem fallback de
+  setas). TDD-lite: reescrita do bloco `tui-store` (`scroll`/`openAt`/
+  `clampOffset` + suíte verde→overview; removidos `l`/setas/PgUp-PgDn/
+  `listFocus`) + teste de `heading` no tema. Store: `View` perde `tests`;
+  inputs `scroll`/`openAt`; `clampOffset` puro; `requestOpenTarget` DRY;
+  `enter` de suíte verde → overview rolado ao header. Renderer: `App.tsx`
+  roteia **Overview (stream)** ao rodar → **TestList (mouse)** ao terminar;
+  `useMouse`→`scroll`/`openAt`/hover; `LIST_TOP_ROW` **fixo** mapeia
+  clique→linha; arquivo+suíte em **negrito branco** (palette `heading`);
+  `mouse.ts` = roda dispara 1× (delta ±3). **96 verdes**, lint+build limpos.
+  **Contrato do `check` byte-inalterado** (e2e). PRD #23 / CLAUDE / SUCCESS /
+  progress reconciliados. **Pendente:** smoke manual da TUI em TTY real (rolar,
+  clicar p/ abrir, hover, negrito-branco, mapa clique→linha) — render Ink não
+  é auto-testado.

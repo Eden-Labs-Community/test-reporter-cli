@@ -355,6 +355,27 @@ function buildScreen(
     );
     summary.setContent(sumLines.join("\n"));
 
+    /* ----- Adaptive layout -----
+     *
+     * No failures → hide the stderr panel and let the list claim the whole
+     * area below the summary. Failures present → restore the 60/40 split so
+     * the failure detail has room to breathe. blessed re-evaluates position
+     * on each `screen.render()`, so mutating the boxes here is enough. */
+    const hasFailures = r.failures.length > 0;
+    const listBoxAny = listBox as unknown as {
+      height: string | number | null;
+      bottom: string | number | null;
+    };
+    if (hasFailures) {
+      stderrBox.show();
+      listBoxAny.height = "60%-5";
+      listBoxAny.bottom = null;
+    } else {
+      stderrBox.hide();
+      listBoxAny.height = null;
+      listBoxAny.bottom = 0;
+    }
+
     /* ----- Middle list box (Passed ↔ Failed) -----
      *
      * Layout (per file group):
@@ -413,22 +434,20 @@ function buildScreen(
     const focusLine = testRowLine[s.listFocus];
     listBox.setScroll(focusLine === undefined ? 0 : Math.max(0, focusLine - 1));
 
-    /* ----- stderr box ----- */
-    setBorderFg(
-      stderrBox,
-      s.focusedPanel === "stderr" ? fail : skip,
-    );
-    const stderrLines: string[] = [];
-    if (r.failures.length === 0) {
-      stderrLines.push(paint(palette, "  —", { dim: true }));
-    } else {
+    /* ----- stderr box (only when there are failures) ----- */
+    if (hasFailures) {
+      setBorderFg(
+        stderrBox,
+        s.focusedPanel === "stderr" ? fail : skip,
+      );
+      const stderrLines: string[] = [];
       r.failures.forEach((f, i) => {
         if (i > 0) stderrLines.push("");
         stderrLines.push(...paintFailure(s.rootDir, palette, f));
       });
+      stderrBox.setContent(stderrLines.join("\n"));
+      stderrBox.setScroll(s.stderrOffset);
     }
-    stderrBox.setContent(stderrLines.join("\n"));
-    stderrBox.setScroll(s.stderrOffset);
 
     screen.render();
   }
@@ -474,6 +493,8 @@ function buildScreen(
   }
   const lpos = (b: Widgets.BoxElement): Lpos | undefined =>
     (b as unknown as { lpos?: Lpos }).lpos;
+  const hidden = (b: Widgets.BoxElement): boolean =>
+    (b as unknown as { hidden?: boolean }).hidden === true;
   const inside = (p: Lpos | undefined, x: number, y: number): boolean =>
     !!p && x >= p.xi && x < p.xl && y >= p.yi && y < p.yl;
 
@@ -486,7 +507,9 @@ function buildScreen(
         return { kind: "chip", index: i };
     }
     if (inside(lpos(listBox), x, y)) return { kind: "list" };
-    if (inside(lpos(stderrBox), x, y)) return { kind: "stderr" };
+    // Skip stderr hit-testing when the panel is hidden (no failures).
+    if (!hidden(stderrBox) && inside(lpos(stderrBox), x, y))
+      return { kind: "stderr" };
     return null;
   }
   function sameTarget(a: Target | null, b: Target | null): boolean {

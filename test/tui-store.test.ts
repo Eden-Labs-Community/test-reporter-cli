@@ -4,9 +4,10 @@ import type { RawRun, RawTest } from "../src/core/result.js";
 import { createStore } from "../src/tui/createStore.js";
 import {
   LIST_PAGE,
-  buildSuiteTree,
-  buildTestList,
+  buildVisibleGroups,
+  buildVisibleList,
   initState,
+  listStatus,
   reduce,
   type TuiState,
 } from "../src/tui/store.js";
@@ -17,82 +18,216 @@ const t = (
   name: string,
   status: RawTest["status"],
   error?: RawTest["error"],
-): RawTest => ({ file: `${ROOT}/${file}`, name, suite: "", status, error });
+  line?: number,
+): RawTest => ({
+  file: `${ROOT}/${file}`,
+  name,
+  suite: "",
+  status,
+  error,
+  line,
+});
 
 const feed = (s: TuiState, ...tests: RawTest[]): TuiState =>
   tests.reduce((acc, test) => reduce(acc, { type: "test", test }), s);
 
-describe("tui store", () => {
-  it("counts live and stays on overview while only passing", () => {
+// The user's main ask (2026-05-25 rewrite): the middle panel title flips —
+// "Passed" while everything passes, "Failed" the moment any test fails. The
+// visible list filters to that status so the user always sees what matters.
+describe("tui store — list status flip (Passed ↔ Failed)", () => {
+  it("listStatus is 'passed' with 0 failures, 'failed' with ≥1", () => {
     let s = initState(ROOT);
-    s = feed(s, t("a.test.ts", "x", "passed"), t("a.test.ts", "y", "skipped"));
-    expect(s.result.passed).toBe(1);
-    expect(s.result.skipped).toBe(1);
-    expect(s.view).toBe("overview");
-    expect(s.phase).toBe("running");
+    expect(listStatus(s)).toBe("passed"); // empty
+    s = feed(s, t("a.test.ts", "x", "passed"));
+    expect(listStatus(s)).toBe("passed");
+    s = feed(s, t("a.test.ts", "y", "failed", { name: "E", message: "m" }));
+    expect(listStatus(s)).toBe("failed");
   });
 
-  it("jumps to a failure the instant it happens (decision #13: option B)", () => {
-    let s = initState(ROOT);
-    s = feed(s, t("a.test.ts", "ok", "passed"));
-    s = feed(s, t("a.test.ts", "boom", "failed", { name: "AssertionError", message: "nope" }));
-    expect(s.view).toBe("failure");
-    expect(s.result.failures[s.focused]?.test).toBe("boom");
-  });
-
-  it("last-failed-wins: a newer failure steals focus", () => {
+  it("buildVisibleList shows passed tests until a failure, then only failed (sorted file→name)", () => {
     let s = initState(ROOT);
     s = feed(
       s,
-      t("z.test.ts", "first", "failed", { name: "Error", message: "1" }),
-      t("a.test.ts", "second", "failed", { name: "Error", message: "2" }),
+      t("b.test.ts", "p2", "passed"),
+      t("a.test.ts", "p1", "passed"),
     );
-    // focus follows the just-failed one even though sort puts a.test.ts first
-    expect(s.result.failures[s.focused]?.test).toBe("second");
+    expect(buildVisibleList(s).map((x) => x.name)).toEqual(["p1", "p2"]);
+    s = feed(
+      s,
+      t("z.test.ts", "z-fail", "failed", { name: "E", message: "m" }),
+      t("a.test.ts", "a-fail", "failed", { name: "E", message: "n" }),
+    );
+    // status flipped → only the failed tests remain visible
+    expect(buildVisibleList(s).map((x) => x.name)).toEqual(["a-fail", "z-fail"]);
   });
 
-  it("n/p cycle failures in deterministic file→name order and wrap", () => {
+  it("buildVisibleGroups groups by file in flat-list order, preserving listFocus index", () => {
     let s = initState(ROOT);
     s = feed(
       s,
-      t("a.test.ts", "fa", "failed", { name: "E", message: "a" }),
-      t("b.test.ts", "fb", "failed", { name: "E", message: "b" }),
+      t("strings.test.ts", "split", "passed"),
+      t("math.test.ts", "divides", "passed"),
+      t("strings.test.ts", "trim", "passed"),
+      t("math.test.ts", "modulo", "passed"),
     );
-    // sorted: a.test.ts/fa (0), b.test.ts/fb (1). focus is on "fb" (last failed).
-    expect(s.result.failures[s.focused]?.test).toBe("fb");
-    s = reduce(s, { type: "key", key: "n" }); // wrap → index 0
-    expect(s.result.failures[s.focused]?.test).toBe("fa");
-    s = reduce(s, { type: "key", key: "p" }); // wrap back → index 1
-    expect(s.result.failures[s.focused]?.test).toBe("fb");
+    const groups = buildVisibleGroups(s);
+    expect(groups.map((g) => g.file)).toEqual([
+      `${ROOT}/math.test.ts`,
+      `${ROOT}/strings.test.ts`,
+    ]);
+    expect(groups[0]?.tests.map((x) => x.test.name)).toEqual([
+      "divides",
+      "modulo",
+    ]);
+    expect(groups[1]?.tests.map((x) => x.test.name)).toEqual(["split", "trim"]);
+    // indexInList must match buildVisibleList — same selection the cursor uses.
+    const flat = buildVisibleList(s);
+    for (const g of groups) {
+      for (const { test, indexInList } of g.tests) {
+        expect(flat[indexInList]).toBe(test);
+      }
+    }
   });
 
-  it("esc returns to overview; n re-opens the failure view", () => {
+  it("flipping listStatus resets listFocus/listOffset (cursor would otherwise dangle)", () => {
     let s = initState(ROOT);
-    s = feed(s, t("a.test.ts", "f", "failed", { name: "E", message: "m" }));
-    s = reduce(s, { type: "key", key: "esc" });
-    expect(s.view).toBe("overview");
-    s = reduce(s, { type: "key", key: "n" });
-    expect(s.view).toBe("failure");
+    const many = Array.from({ length: LIST_PAGE + 3 }, (_, i) =>
+      t("a.test.ts", `p${String(i).padStart(2, "0")}`, "passed"),
+    );
+    s = feed(s, ...many);
+    for (let i = 0; i < LIST_PAGE + 2; i++)
+      s = reduce(s, { type: "key", key: "down" });
+    expect(s.listFocus).toBeGreaterThan(0);
+    s = feed(s, t("z.test.ts", "boom", "failed", { name: "E", message: "m" }));
+    expect(listStatus(s)).toBe("failed");
+    expect(s.listFocus).toBe(0);
+    expect(s.listOffset).toBe(0);
+  });
+});
+
+describe("tui store — keyboard (3-panel blessed UI)", () => {
+  it("starts focused on the list panel", () => {
+    const s = initState(ROOT);
+    expect(s.focusedPanel).toBe("list");
   });
 
-  it("done finalizes from the authoritative run and keeps the failure", () => {
+  it("tab toggles focusedPanel: list ↔ stderr", () => {
     let s = initState(ROOT);
-    s = feed(s, t("a.test.ts", "f", "failed", { name: "E", message: "m" }));
-    const run: RawRun = {
-      rootDir: ROOT,
-      durationMs: 4200,
-      tests: [
-        { file: `${ROOT}/a.test.ts`, name: "f", suite: "", status: "failed", error: { name: "E", message: "m" } },
-        { file: `${ROOT}/a.test.ts`, name: "g", suite: "", status: "passed" },
-      ],
-    };
-    s = reduce(s, { type: "done", run });
-    expect(s.phase).toBe("done");
-    expect(s.result.passed).toBe(1);
-    expect(s.result.failed).toBe(1);
-    expect(s.result.durationMs).toBe(4200);
-    expect(s.exitCode).toBe(1);
-    expect(s.view).toBe("failure");
+    s = reduce(s, { type: "key", key: "tab" });
+    expect(s.focusedPanel).toBe("stderr");
+    s = reduce(s, { type: "key", key: "tab" });
+    expect(s.focusedPanel).toBe("list");
+  });
+
+  it("up/down moves the list cursor when panel=list (clamped)", () => {
+    let s = initState(ROOT);
+    s = feed(
+      s,
+      t("a.test.ts", "p1", "passed"),
+      t("a.test.ts", "p2", "passed"),
+      t("a.test.ts", "p3", "passed"),
+    );
+    s = reduce(s, { type: "key", key: "down" });
+    expect(s.listFocus).toBe(1);
+    s = reduce(s, { type: "key", key: "down" });
+    expect(s.listFocus).toBe(2);
+    s = reduce(s, { type: "key", key: "down" }); // clamp at last
+    expect(s.listFocus).toBe(2);
+    s = reduce(s, { type: "key", key: "up" });
+    expect(s.listFocus).toBe(1);
+    s = reduce(s, { type: "key", key: "up" });
+    s = reduce(s, { type: "key", key: "up" });
+    s = reduce(s, { type: "key", key: "up" }); // clamp at 0
+    expect(s.listFocus).toBe(0);
+  });
+
+  it("up/down scrolls stderrOffset when panel=stderr (clamped at 0; renderer clamps the top)", () => {
+    let s = initState(ROOT);
+    s = reduce(s, { type: "key", key: "tab" });
+    expect(s.stderrOffset).toBe(0);
+    s = reduce(s, { type: "key", key: "up" }); // clamp at 0
+    expect(s.stderrOffset).toBe(0);
+    s = reduce(s, { type: "key", key: "down" });
+    expect(s.stderrOffset).toBe(1);
+    s = reduce(s, { type: "key", key: "down" });
+    expect(s.stderrOffset).toBe(2);
+    s = reduce(s, { type: "key", key: "up" });
+    expect(s.stderrOffset).toBe(1);
+  });
+
+  it("pgdn/pgup jump by LIST_PAGE on the focused panel", () => {
+    let s = initState(ROOT);
+    const many = Array.from({ length: LIST_PAGE * 3 }, (_, i) =>
+      t("a.test.ts", `p${String(i).padStart(2, "0")}`, "passed"),
+    );
+    s = feed(s, ...many);
+    s = reduce(s, { type: "key", key: "pgdn" });
+    expect(s.listFocus).toBe(LIST_PAGE);
+    s = reduce(s, { type: "key", key: "pgup" });
+    expect(s.listFocus).toBe(0);
+
+    s = reduce(s, { type: "key", key: "tab" });
+    s = reduce(s, { type: "key", key: "pgdn" });
+    expect(s.stderrOffset).toBe(LIST_PAGE);
+    s = reduce(s, { type: "key", key: "pgup" });
+    expect(s.stderrOffset).toBe(0);
+  });
+
+  it("enter/open opens the focused list test in the editor (monotonic seq, abs path)", () => {
+    let s = initState(ROOT);
+    s = feed(
+      s,
+      t("a.test.ts", "p1", "passed", undefined, 5),
+      t("b.test.ts", "p2", "passed", undefined, 9),
+    );
+    expect(s.openRequest).toBeUndefined();
+    s = reduce(s, { type: "key", key: "open" });
+    expect(s.openRequest).toMatchObject({
+      file: `${ROOT}/a.test.ts`,
+      line: 5,
+      seq: 1,
+    });
+    s = reduce(s, { type: "key", key: "down" });
+    s = reduce(s, { type: "key", key: "enter" });
+    expect(s.openRequest).toMatchObject({
+      file: `${ROOT}/b.test.ts`,
+      line: 9,
+      seq: 2,
+    });
+  });
+
+  it("enter/open targets the visible list (= failed tests when failures exist)", () => {
+    let s = initState(ROOT);
+    s = feed(
+      s,
+      t("a.test.ts", "p1", "passed", undefined, 3),
+      t("a.test.ts", "boom", "failed", { name: "E", message: "m" }, 7),
+    );
+    expect(listStatus(s)).toBe("failed");
+    s = reduce(s, { type: "key", key: "open" });
+    expect(s.openRequest).toMatchObject({
+      file: `${ROOT}/a.test.ts`,
+      line: 7,
+      seq: 1,
+    });
+  });
+
+  it("open works regardless of which panel has scroll focus (always targets the list cursor)", () => {
+    let s = initState(ROOT);
+    s = feed(s, t("a.test.ts", "p1", "passed", undefined, 4));
+    s = reduce(s, { type: "key", key: "tab" }); // focus stderr
+    s = reduce(s, { type: "key", key: "open" });
+    expect(s.openRequest).toMatchObject({
+      file: `${ROOT}/a.test.ts`,
+      line: 4,
+      seq: 1,
+    });
+  });
+
+  it("open with an empty list is a no-op (no openRequest)", () => {
+    let s = initState(ROOT);
+    s = reduce(s, { type: "key", key: "open" });
+    expect(s.openRequest).toBeUndefined();
   });
 
   it("q signals exit", () => {
@@ -102,242 +237,137 @@ describe("tui store", () => {
   });
 });
 
-describe("tui store — watch (M3)", () => {
-  const finished = (...tests: RawTest[]): RawRun => ({
-    rootDir: ROOT,
-    durationMs: 1000,
-    tests,
+describe("tui store — mouse inputs (selectListIndex / focusPanel)", () => {
+  it("focusPanel sets the scroll-focused panel", () => {
+    let s = initState(ROOT);
+    expect(s.focusedPanel).toBe("list");
+    s = reduce(s, { type: "focusPanel", panel: "stderr" });
+    expect(s.focusedPanel).toBe("stderr");
+    s = reduce(s, { type: "focusPanel", panel: "list" });
+    expect(s.focusedPanel).toBe("list");
   });
 
-  it("rerun resets the per-cycle counters, returns to running/overview, records the trigger (RF-04)", () => {
+  it("selectListIndex moves listFocus and takes list focus (clamped, window slides)", () => {
     let s = initState(ROOT);
-    s = feed(s, t("a.test.ts", "f", "failed", { name: "E", message: "m" }));
+    const many = Array.from({ length: LIST_PAGE * 2 }, (_, i) =>
+      t("a.test.ts", `p${String(i).padStart(2, "0")}`, "passed"),
+    );
+    s = feed(s, ...many);
+    s = reduce(s, { type: "focusPanel", panel: "stderr" });
+    s = reduce(s, { type: "selectListIndex", index: LIST_PAGE + 2 });
+    expect(s.focusedPanel).toBe("list");
+    expect(s.listFocus).toBe(LIST_PAGE + 2);
+    expect(s.listOffset).toBeGreaterThan(0);
+    // clamps to last when over-shooting
+    s = reduce(s, { type: "selectListIndex", index: 9999 });
+    expect(s.listFocus).toBe(many.length - 1);
+  });
+
+  it("selectListIndex + open opens the clicked test (sequence dispatched by the mouse edge)", () => {
+    let s = initState(ROOT);
+    s = feed(
+      s,
+      t("a.test.ts", "p1", "passed", undefined, 3),
+      t("a.test.ts", "p2", "passed", undefined, 4),
+      t("b.test.ts", "p3", "passed", undefined, 7),
+    );
+    s = reduce(s, { type: "selectListIndex", index: 2 });
+    s = reduce(s, { type: "key", key: "open" });
+    expect(s.openRequest).toMatchObject({
+      file: `${ROOT}/b.test.ts`,
+      line: 7,
+      seq: 1,
+    });
+  });
+});
+
+describe("tui store — lifecycle (done/rerun/notice)", () => {
+  it("done finalizes from the authoritative run; exitCode=1 if any failed", () => {
+    let s = initState(ROOT);
+    const run: RawRun = {
+      rootDir: ROOT,
+      durationMs: 4200,
+      tests: [
+        {
+          file: `${ROOT}/a.test.ts`,
+          name: "ok",
+          suite: "",
+          status: "passed",
+        },
+        {
+          file: `${ROOT}/a.test.ts`,
+          name: "boom",
+          suite: "",
+          status: "failed",
+          error: { name: "E", message: "m" },
+        },
+      ],
+    };
+    s = reduce(s, { type: "done", run });
+    expect(s.phase).toBe("done");
+    expect(s.result.passed).toBe(1);
+    expect(s.result.failed).toBe(1);
+    expect(s.result.durationMs).toBe(4200);
+    expect(s.exitCode).toBe(1);
+    expect(listStatus(s)).toBe("failed");
+  });
+
+  it("done with all passing → exitCode 0, listStatus 'passed'", () => {
+    let s = initState(ROOT);
     s = reduce(s, {
       type: "done",
-      run: finished(t("a.test.ts", "f", "failed", { name: "E", message: "m" })),
+      run: {
+        rootDir: ROOT,
+        durationMs: 100,
+        tests: [
+          {
+            file: `${ROOT}/a.test.ts`,
+            name: "ok",
+            suite: "",
+            status: "passed",
+          },
+        ],
+      },
     });
-    expect(s.phase).toBe("done");
+    expect(s.exitCode).toBe(0);
+    expect(listStatus(s)).toBe("passed");
+  });
 
+  it("rerun resets list/stderr offsets, focusedPanel, and records watchTrigger", () => {
+    let s = initState(ROOT);
+    s = feed(s, t("a.test.ts", "p", "passed"));
+    s = reduce(s, { type: "key", key: "tab" });
+    s = reduce(s, { type: "key", key: "down" });
+    expect(s.focusedPanel).toBe("stderr");
     s = reduce(s, { type: "rerun", trigger: `${ROOT}/a.test.ts` });
     expect(s.phase).toBe("running");
     expect(s.tests).toEqual([]);
-    expect(s.result.passed).toBe(0);
-    expect(s.result.failed).toBe(0);
-    expect(s.view).toBe("overview");
+    expect(s.focusedPanel).toBe("list");
+    expect(s.listFocus).toBe(0);
+    expect(s.listOffset).toBe(0);
+    expect(s.stderrOffset).toBe(0);
     expect(s.watchTrigger).toBe(`${ROOT}/a.test.ts`);
   });
 
-  it("after a rerun, decision #18 still steals focus on a new failure", () => {
-    let s = initState(ROOT);
-    s = reduce(s, {
-      type: "done",
-      run: finished(t("a.test.ts", "ok", "passed")),
-    });
-    s = reduce(s, { type: "rerun", trigger: `${ROOT}/a.test.ts` });
-    s = feed(s, t("a.test.ts", "boom", "failed", { name: "E", message: "x" }));
-    expect(s.view).toBe("failure");
-    expect(s.result.failures[s.focused]?.test).toBe("boom");
-  });
-
-  it("a/f request a watch command via a monotonic seq; q still exits", () => {
+  it("a/f bump command seq monotonically (watch keys)", () => {
     let s = initState(ROOT);
     expect(s.command).toBeUndefined();
     s = reduce(s, { type: "key", key: "a" });
     expect(s.command).toEqual({ kind: "all", seq: 1 });
     s = reduce(s, { type: "key", key: "f" });
     expect(s.command).toEqual({ kind: "failed", seq: 2 });
-    s = reduce(s, { type: "key", key: "a" }); // repeating a kind still bumps seq
+    s = reduce(s, { type: "key", key: "a" });
     expect(s.command).toEqual({ kind: "all", seq: 3 });
-    s = reduce(s, { type: "key", key: "q" });
-    expect(s.exited).toBe(true);
-  });
-});
-
-describe("tui store — suite tree (M4)", () => {
-  const mk = (file: string, suite: string, st: RawTest["status"]): RawTest => ({
-    file: `${ROOT}/${file}`,
-    name: `${suite} > t`,
-    suite,
-    status: st,
-  });
-
-  it("buildSuiteTree groups by (file, suite), counts, deterministic order", () => {
-    const tree = buildSuiteTree([
-      mk("b.test.ts", "B", "passed"),
-      mk("a.test.ts", "A", "failed"),
-      mk("a.test.ts", "A", "passed"),
-      mk("a.test.ts", "A", "skipped"),
-    ]);
-    expect(tree.map((n) => `${n.file}|${n.suite}`)).toEqual([
-      `${ROOT}/a.test.ts|A`,
-      `${ROOT}/b.test.ts|B`,
-    ]);
-    expect(tree[0]).toMatchObject({
-      passed: 1,
-      failed: 1,
-      skipped: 1,
-      total: 3,
-    });
-  });
-
-  it("s toggles the suites view; up/down move and clamp", () => {
-    let s = initState(ROOT);
-    s = feed(
-      s,
-      mk("a.test.ts", "A", "passed"),
-      mk("b.test.ts", "B", "failed"),
-    );
-    s = reduce(s, { type: "key", key: "s" });
-    expect(s.view).toBe("suites");
-    expect(s.treeFocus).toBe(0);
-    s = reduce(s, { type: "key", key: "up" }); // clamp at 0
-    expect(s.treeFocus).toBe(0);
-    s = reduce(s, { type: "key", key: "down" });
-    expect(s.treeFocus).toBe(1);
-    s = reduce(s, { type: "key", key: "down" }); // clamp at last
-    expect(s.treeFocus).toBe(1);
-    s = reduce(s, { type: "key", key: "s" }); // toggle back
-    expect(s.view).toBe("overview");
-  });
-
-  it("enter on a failing suite jumps to its first failure; no-op on a green suite", () => {
-    let s = initState(ROOT);
-    s = feed(
-      s,
-      mk("a.test.ts", "A", "passed"), // green suite at tree index 0
-      t("b.test.ts", "B > boom", "failed", { name: "E", message: "m" }),
-    );
-    // failure stole focus → go to suites and select the green suite (idx 0)
-    s = reduce(s, { type: "key", key: "s" });
-    expect(s.view).toBe("suites");
-    s = reduce(s, { type: "key", key: "enter" }); // green suite → no-op
-    expect(s.view).toBe("suites");
-    s = reduce(s, { type: "key", key: "down" }); // select b.test.ts/B
-    s = reduce(s, { type: "key", key: "enter" });
-    expect(s.view).toBe("failure");
-    expect(s.result.failures[s.focused]?.test).toBe("B > boom");
-  });
-
-  it("rerun resets the tree selection", () => {
-    let s = initState(ROOT);
-    s = feed(s, mk("a.test.ts", "A", "passed"), mk("b.test.ts", "B", "passed"));
-    s = reduce(s, { type: "key", key: "s" });
-    s = reduce(s, { type: "key", key: "down" });
-    expect(s.treeFocus).toBe(1);
-    s = reduce(s, { type: "rerun", trigger: `${ROOT}/a.test.ts` });
-    expect(s.treeFocus).toBe(0);
-  });
-});
-
-describe("tui store — scrollable test list (M4.1)", () => {
-  const lt = (
-    file: string,
-    name: string,
-    st: RawTest["status"],
-    line?: number,
-  ): RawTest => ({ file: `${ROOT}/${file}`, name, suite: "", status: st, line });
-
-  it("buildTestList orders deterministically by (file, name)", () => {
-    const list = buildTestList([
-      lt("b.test.ts", "z", "passed"),
-      lt("a.test.ts", "b", "passed"),
-      lt("a.test.ts", "a", "failed"),
-    ]);
-    expect(list.map((t) => `${t.file}|${t.name}`)).toEqual([
-      `${ROOT}/a.test.ts|a`,
-      `${ROOT}/a.test.ts|b`,
-      `${ROOT}/b.test.ts|z`,
-    ]);
-  });
-
-  it("l toggles the list view; up/down move + scroll the window", () => {
-    let s = initState(ROOT);
-    const many = Array.from({ length: LIST_PAGE + 5 }, (_, i) =>
-      lt("a.test.ts", `t${String(i).padStart(2, "0")}`, "passed", i + 1),
-    );
-    s = feed(s, ...many);
-    s = reduce(s, { type: "key", key: "l" });
-    expect(s.view).toBe("tests");
-    expect(s.listFocus).toBe(0);
-    expect(s.listOffset).toBe(0);
-    s = reduce(s, { type: "key", key: "up" }); // clamp at top
-    expect(s.listFocus).toBe(0);
-    for (let i = 0; i < LIST_PAGE; i++) s = reduce(s, { type: "key", key: "down" });
-    expect(s.listFocus).toBe(LIST_PAGE);
-    expect(s.listOffset).toBe(1); // window scrolled to keep focus visible
-    s = reduce(s, { type: "key", key: "l" }); // toggle back
-    expect(s.view).toBe("overview");
-  });
-
-  it("pgdn/pgup jump by a page and clamp at the ends", () => {
-    let s = initState(ROOT);
-    const many = Array.from({ length: LIST_PAGE * 3 }, (_, i) =>
-      lt("a.test.ts", `t${String(i).padStart(2, "0")}`, "passed", i + 1),
-    );
-    s = feed(s, ...many);
-    s = reduce(s, { type: "key", key: "l" });
-    s = reduce(s, { type: "key", key: "pgdn" });
-    expect(s.listFocus).toBe(LIST_PAGE);
-    s = reduce(s, { type: "key", key: "pgup" });
-    expect(s.listFocus).toBe(0);
-    for (let i = 0; i < 10; i++) s = reduce(s, { type: "key", key: "pgdn" });
-    expect(s.listFocus).toBe(LIST_PAGE * 3 - 1); // clamped at last
-  });
-
-  it("o/enter request opening the focused test at file:line (monotonic seq)", () => {
-    let s = initState(ROOT);
-    s = feed(
-      s,
-      lt("a.test.ts", "first", "passed", 4),
-      lt("b.test.ts", "second", "failed", 9),
-    );
-    s = reduce(s, { type: "key", key: "l" });
-    expect(s.openRequest).toBeUndefined();
-    s = reduce(s, { type: "key", key: "open" });
-    expect(s.openRequest).toMatchObject({
-      file: `${ROOT}/a.test.ts`,
-      line: 4,
-      seq: 1,
-    });
-    s = reduce(s, { type: "key", key: "down" });
-    s = reduce(s, { type: "key", key: "enter" }); // enter == open in list view
-    expect(s.openRequest).toMatchObject({
-      file: `${ROOT}/b.test.ts`,
-      line: 9,
-      seq: 2,
-    });
-  });
-
-  it("open from the failure view targets the failing file:line (abs path)", () => {
-    let s = initState(ROOT);
-    s = feed(s, t("a.test.ts", "boom", "failed", { name: "E", message: "m" }));
-    // failure view is auto-focused (decision #18)
-    expect(s.view).toBe("failure");
-    s = reduce(s, { type: "key", key: "open" });
-    expect(s.openRequest?.file).toBe(`${ROOT}/a.test.ts`);
-    expect(s.openRequest?.seq).toBe(1);
   });
 
   it("open sets an optimistic notice; a notice input overrides it", () => {
     let s = initState(ROOT);
-    s = feed(s, lt("a.test.ts", "x", "passed", 7));
-    s = reduce(s, { type: "key", key: "l" });
+    s = feed(s, t("a.test.ts", "p", "passed", undefined, 7));
     s = reduce(s, { type: "key", key: "open" });
     expect(s.notice).toContain("a.test.ts");
     expect(s.notice).toContain("7");
-    s = reduce(s, { type: "notice", text: "could not open editor" });
-    expect(s.notice).toBe("could not open editor");
-  });
-
-  it("rerun resets list focus/scroll", () => {
-    let s = initState(ROOT);
-    s = feed(s, lt("a.test.ts", "x", "passed", 1), lt("a.test.ts", "y", "passed", 2));
-    s = reduce(s, { type: "key", key: "l" });
-    s = reduce(s, { type: "key", key: "down" });
-    expect(s.listFocus).toBe(1);
-    s = reduce(s, { type: "rerun", trigger: `${ROOT}/a.test.ts` });
-    expect(s.listFocus).toBe(0);
-    expect(s.listOffset).toBe(0);
+    s = reduce(s, { type: "notice", text: "could not open" });
+    expect(s.notice).toBe("could not open");
   });
 });
 
@@ -352,7 +382,7 @@ describe("createStore", () => {
     expect(store.getState().exited).toBe(true);
     expect(n).toBe(1);
     unsub();
-    store.dispatch({ type: "key", key: "esc" });
-    expect(n).toBe(1); // no longer notified after unsubscribe
+    store.dispatch({ type: "key", key: "tab" });
+    expect(n).toBe(1);
   });
 });

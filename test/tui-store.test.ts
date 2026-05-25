@@ -448,6 +448,20 @@ describe("tui store — lock-on-save + countdown", () => {
     expect(s.lockedFiles).toBeUndefined();
   });
 
+  // Real-world regression (2026-05-25): Vitest's native watcher also fires
+  // `onWatcherRerun(files, undefined)` for our own `rerunFiles()` (= the chip
+  // [ all ] and the post-green countdown). Without this guard the reducer
+  // would treat that as a lock — countdown fires → triggerAll → another
+  // locked cycle → another countdown, forever. Tie the lock to `trigger`.
+  it("rerun with relatedFiles but no trigger does NOT lock (manual [ all ] in Vitest)", () => {
+    let s = initState(ROOT);
+    s = reduce(s, {
+      type: "rerun",
+      relatedFiles: [`${ROOT}/src/foo.test.ts`, `${ROOT}/src/bar.test.ts`],
+    });
+    expect(s.lockedFiles).toBeUndefined();
+  });
+
   it("buildVisibleList filters by lockedFiles while everything is green", () => {
     let s = initState(ROOT);
     s = reduce(s, {

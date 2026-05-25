@@ -28,7 +28,7 @@ Esses quatro devem sempre refletir a realidade atual.
 
 `test-reporter-cli`: CLI de relatório de testes — **`run`/`watch`/`check`**
 (+ `init`) e **dois públicos distintos** (dev na TUI · Claude no `check`).
-**v2.0.1 publicada (`eden-test-reporter-cli`); 107 verdes.**
+**v2.0.1 publicada (`eden-test-reporter-cli`); 108 verdes.**
 
 - **`test-reporter run`** — TUI (blessed) bonita e ao vivo, para devs; comando
   default. Non-TTY/CI/`--summary`/`--json` → cai no contrato do `check`. UX
@@ -186,9 +186,14 @@ Detalhes completos do contrato: **PRD.md §7**.
   store: resultado do spawn do editor) · `countdownStart{at,durationMs}` /
   `countdownClear` (edge → store; `at` vem do `Date.now()` da edge p/ manter
   o reducer puro) · eventos do runner (`test`/`done`/`rerun`). Em `rerun`:
-  popula `lockedFiles` priorizando `input.relatedFiles` (Vitest = `_files`
-  do `onWatcherRerun`, lista absoluta dos `.test.*` que vão re-rodar; Jest =
-  `[trigger]`) com fallback p/ `[trigger]` quando ausente; sem nada → limpa.
+  **só lockeia quando `input.trigger` está presente** (= save real); com
+  trigger prioriza `input.relatedFiles` (Vitest = `_files` do
+  `onWatcherRerun`, lista absoluta dos `.test.*` que vão re-rodar; Jest =
+  `[trigger]`) com fallback p/ `[trigger]`. **Sem trigger = `undefined`**
+  — manual `[ all ]`/`[ failed ]` / auto-fire do countdown chamam
+  `api.rerunFiles()` no Vitest, que re-emite `onWatcherRerun(files, undefined)`
+  (`relatedFiles` populado, sem trigger); se locássemos esse ciclo, o
+  countdown re-disparava → triggerAll → re-lock, infinito.
   **Zera countdown** sempre. Em `key:"a"`/`"f"`: também zeram countdown
   (mesmo path do auto-fire do `wireCountdown`). `openTarget`→`absFile`
   (sempre absoluto; editor detached sem cwd). `tui/createStore` — observable.
@@ -273,7 +278,7 @@ Detalhes completos do contrato: **PRD.md §7**.
   Sempre processo filho. (Por isso `runner-factory.test.ts` só **constrói** o
   adapter, nunca chama `.run()`.)
 - Comandos: `npm run build` (**tsc + `copy-assets.mjs`** copia o `.cjs` p/
-  `dist/`) · `npm test` (vitest run, **107 verdes**) · `npm run lint`
+  `dist/`) · `npm test` (vitest run, **108 verdes**) · `npm run lint`
   (= `tsc --noEmit`). Não precisa buildar p/ testar — e2e roda via `tsx`
   (o `.cjs` resolve em `src/` via `import.meta.url`). Publicável verificado:
   `npm pack` instala e roda fora do repo (`bin`/shebang/`exports` OK).

@@ -326,23 +326,23 @@ export function reduce(s: TuiState, input: Input): TuiState {
       // naturally as the new cycle's tests stream in. `watchTrigger` = the
       // saved file (RF-04) so the renderer can surface it.
       //
-      // M5/#24 lock-on-save: prefer the runner's `relatedFiles` (Vitest's
-      // module-graph `_files`) — those are the actual test paths that will
-      // be re-executed and the lock will match. Fall back to `[trigger]` so
-      // a user who saved a test file directly still gets a meaningful lock
+      // M5/#24 lock-on-save: lock ONLY when this cycle came from a save (=
+      // `trigger` set). Vitest also fires `onWatcherRerun(files, undefined)`
+      // for our own `rerunFiles()` — the [ all ] chip and the post-green
+      // countdown's auto-fire. Without this guard, that re-emitted
+      // `relatedFiles` would re-lock → countdown → triggerAll → re-lock,
+      // forever. With a save, prefer `relatedFiles` (Vitest's module-graph
+      // `_files`, the actual test paths re-executed) and fall back to
+      // `[trigger]` so a saved test file still gives a meaningful lock
       // (and {@link lockAppliesNow}'s fallthrough handles the source-file
-      // case where nothing matches). No trigger AND no relatedFiles means
-      // the cycle came from `[ all ]`/`[ failed ]` or the initial pass →
-      // release the lock. Either way the countdown — if one was rolling —
-      // is cancelled, because the next cycle's verdict has to decide
-      // whether to start a new one.
-      const related = input.relatedFiles;
-      const lockedFiles =
-        related && related.length > 0
-          ? related
-          : input.trigger
-            ? [input.trigger]
-            : undefined;
+      // case where nothing matches). Either way the countdown — if one
+      // was rolling — is cancelled, because the next cycle's verdict has
+      // to decide whether to start a new one.
+      const lockedFiles = input.trigger
+        ? input.relatedFiles && input.relatedFiles.length > 0
+          ? input.relatedFiles
+          : [input.trigger]
+        : undefined;
       return {
         ...s,
         phase: "running",

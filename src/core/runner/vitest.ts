@@ -1,3 +1,5 @@
+import { PassThrough } from "node:stream";
+
 import { startVitest } from "vitest/node";
 
 import type { Config } from "../../config/index.js";
@@ -262,15 +264,31 @@ export class VitestAdapter extends TestRunnerAdapter {
   ): Promise<WatchHandle> {
     let vitest: Awaited<ReturnType<typeof startVitest>> | undefined;
     try {
-      vitest = await startVitest("test", [], {
-        root: cwd,
-        watch: true,
-        include: config.include,
-        reporters: [new StreamReporter(onEvent, { cwd })],
-        includeTaskLocation: true,
-        silent: true,
-        passWithNoTests: true,
-      });
+      vitest = await startVitest(
+        "test",
+        [],
+        {
+          root: cwd,
+          watch: true,
+          include: config.include,
+          reporters: [new StreamReporter(onEvent, { cwd })],
+          includeTaskLocation: true,
+          silent: true,
+          passWithNoTests: true,
+        },
+        undefined,
+        // Hand Vitest a non-TTY stdin stub so it skips `registerConsoleShortcuts`
+        // (cli-api: `if (stdin.isTTY && ctx.config.watch)`). Otherwise its
+        // keypress handler reads the same stdin as our TUI and parses the
+        // mouse-capture escape sequences as `w`/`p`/`h`/etc — triggering Watch
+        // Usage prints and the "Input a single project name" prompt mid-run.
+        // The stub is never read from (no shortcuts registered ⇒ no consumer).
+        {
+          stdin: Object.assign(new PassThrough(), {
+            isTTY: false,
+          }) as unknown as NodeJS.ReadStream,
+        },
+      );
     } catch (err) {
       throw new RunnerError((err as Error).message);
     }

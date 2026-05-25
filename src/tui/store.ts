@@ -2,109 +2,24 @@ import { isAbsolute, resolve } from "node:path";
 
 import type { RunEvent } from "../core/events.js";
 import {
-  type Failure,
   type RawTest,
   type RunResult,
   normalize,
-  toPosixRelative,
 } from "../core/result.js";
 
-/** Which screen the TUI shows. The scrollable test list is the default view's
- *  done-phase rendering (mouse-driven), not a screen of its own. */
-export type View = "overview" | "failure" | "suites";
-
-/** Default visible rows in the scrollable test list (fallback before first resize). */
+/**
+ * Visible rows in the scrollable list (and the page-jump unit for stderr).
+ * Render-side panels enforce their own visual height; this is the *logical*
+ * page size that the pure reducer uses for `pgup`/`pgdn` and window-sliding.
+ */
 export const LIST_PAGE = 8;
 
-/** Pure selector: the flat, scrollable test list — deterministic (file,name)
- *  order, same discipline as the `check` failure ordering. */
-export function buildTestList(tests: RawTest[]): RawTest[] {
-  return [...tests].sort((a, b) =>
-    a.file !== b.file
-      ? a.file < b.file
-        ? -1
-        : 1
-      : a.name < b.name
-        ? -1
-        : a.name > b.name
-          ? 1
-          : 0,
-  );
-}
-
-/** An item in the grouped test list: either a suite section header or a test. */
-export type GroupedListItem =
-  | { kind: "suite-header"; file: string; suite: string }
-  | { kind: "test"; data: RawTest };
-
-/** Pure selector: tests grouped by (file, suite) with a header before each
- *  group. Same deterministic ordering as buildTestList; because tests sort by
- *  (file, name) and name starts with the suite prefix, each (file,suite) group
- *  is naturally consecutive after sorting. */
-export function buildGroupedList(tests: RawTest[]): GroupedListItem[] {
-  const sorted = buildTestList(tests);
-  const items: GroupedListItem[] = [];
-  let lastKey = "";
-  for (const t of sorted) {
-    const key = `${t.file}\0${t.suite ?? ""}`;
-    if (key !== lastKey) {
-      items.push({ kind: "suite-header", file: t.file, suite: t.suite ?? "" });
-      lastKey = key;
-    }
-    items.push({ kind: "test", data: t });
-  }
-  return items;
-}
-
-/** Pure: clamp a scroll offset into `[0, max(0, len - pageSize)]`. */
-export function clampOffset(
-  offset: number,
-  len: number,
-  pageSize: number,
-): number {
-  const max = Math.max(0, len - pageSize);
-  return Math.min(Math.max(offset, 0), max);
-}
-
-/** One (file, suite) group with live status counts. Deterministically ordered
- *  by (file, suite) — same discipline as the `check` failure ordering. */
-export interface SuiteNode {
-  file: string;
-  suite: string;
-  passed: number;
-  failed: number;
-  skipped: number;
-  total: number;
-}
-
-/** Pure selector: the navigable suite tree from the live tests (RF-05). */
-export function buildSuiteTree(tests: RawTest[]): SuiteNode[] {
-  const byKey = new Map<string, SuiteNode>();
-  for (const t of tests) {
-    const suite = t.suite ?? "";
-    const key = `${t.file} ${suite}`;
-    let node = byKey.get(key);
-    if (!node) {
-      node = { file: t.file, suite, passed: 0, failed: 0, skipped: 0, total: 0 };
-      byKey.set(key, node);
-    }
-    node.total++;
-    if (t.status === "passed") node.passed++;
-    else if (t.status === "failed") node.failed++;
-    else node.skipped++;
-  }
-  return [...byKey.values()].sort((a, b) =>
-    a.file !== b.file
-      ? a.file < b.file
-        ? -1
-        : 1
-      : a.suite < b.suite
-        ? -1
-        : a.suite > b.suite
-          ? 1
-          : 0,
-  );
-}
+/**
+ * Which panel currently owns scroll/arrow input. Tab toggles. The list panel
+ * (middle box) is the only one that has a "current item" — `enter`/`o` always
+ * opens that one regardless of which panel has scroll focus.
+ */
+export type FocusedPanel = "list" | "stderr";
 
 export interface TuiState {
   phase: "running" | "done";
@@ -113,25 +28,20 @@ export interface TuiState {
   tests: RawTest[];
   /** Always `normalize(...)` of `tests` — same model/ordering as `check` (DRY). */
   result: RunResult;
-  view: View;
-  /** Index into `result.failures` (meaningful while `view === "failure"`). */
-  focused: number;
-  /** Index into `buildSuiteTree(tests)` (meaningful while `view==="suites"`). */
-  treeFocus: number;
-  /** Scroll position into `buildGroupedList(tests)` — the mouse-driven test
-   *  list (the default view's rendering when `phase==="done"`). Moved only by
-   *  the wheel (`scroll`); there is no keyboard cursor. */
+  /** Which of the two scrollable panels owns up/down/PgUp/PgDn. */
+  focusedPanel: FocusedPanel;
+  /** Selection + scroll window into `buildVisibleList(s)` (middle box). */
+  listFocus: number;
   listOffset: number;
-  /** Visible rows in the test list — updated by `resize` dispatches from the App. */
-  listPage: number;
+  /** Scroll offset into the stderr box; the renderer clamps to its content height. */
+  stderrOffset: number;
   /**
-   * "Open this test in the editor" intent (M4.1). `seq` is monotonic so the
-   * edge (renderTui) spawns the editor once per request — same discipline as
+   * "Open this test in the editor" intent. `seq` is monotonic so the edge
+   * (renderTui) spawns the editor once per press — same discipline as
    * `command`/`exited`. The store stays pure; spawning is the thin edge.
    */
   openRequest?: { file: string; line?: number; col?: number; seq: number };
-  /** Transient status line (e.g. "opening …" / "couldn't run …").
-   *  Set optimistically on open, overridden by the edge on the spawn result. */
+  /** Transient status line (e.g. "opening …" / "couldn't run editor — set ui.editor"). */
   notice?: string;
   exited: boolean;
   exitCode: number;
@@ -139,36 +49,100 @@ export interface TuiState {
   watchTrigger?: string;
   /**
    * Watch (M3): a re-run requested via `a`/`f`. `seq` is monotonic so the edge
-   * (renderWatchTui) acts once per press even when the same kind repeats —
-   * pure-store discipline, same pattern as `exited` driving `exit()`.
+   * (renderWatchTui) acts once per press even when the same kind repeats.
    */
   command?: { kind: "all" | "failed"; seq: number };
 }
 
-/** Store inputs: runner lifecycle events + the TUI's own mouse/key inputs. */
+/** Store inputs: runner lifecycle events + UI events (mouse edges in v1.2,
+ *  keyboard inputs kept for the store's unit tests and as a safety escape). */
 export type Input =
   | RunEvent
   | { type: "notice"; text: string } // edge → store (editor spawn result)
-  | { type: "resize"; pageSize: number } // App → store when terminal rows change
-  | { type: "scroll"; delta: number } // mouse wheel → move the list scroll offset
-  | { type: "openAt"; index: number } // mouse click → open the list item at index
+  /** Mouse: click a row in the visible list (selects + scroll-window adjust). */
+  | { type: "selectListIndex"; index: number }
+  /** Mouse: click a panel to take scroll focus (so wheel scroll applies there). */
+  | { type: "focusPanel"; panel: FocusedPanel }
   | {
       type: "key";
       key:
-        | "n"
-        | "p"
-        | "esc"
         | "q"
-        | "a"
-        | "f"
-        | "s"
+        | "tab"
         | "up"
         | "down"
+        | "pgup"
+        | "pgdn"
         | "enter"
-        | "open";
+        | "open"
+        | "a"
+        | "f";
     };
 
-const failureKey = (f: Failure): string => `${f.file} ${f.suite} ${f.test}`;
+/**
+ * The middle panel's title flips with the overall verdict — this is the user
+ * decision driving the 2026-05-25 rewrite: "Passed" while everything passes,
+ * "Failed" the moment any test fails. Derived (never stored) so it is always
+ * consistent with `result.failed`.
+ */
+export function listStatus(s: TuiState): "passed" | "failed" {
+  return s.result.failed > 0 ? "failed" : "passed";
+}
+
+/**
+ * Pure selector: the testimony shown in the middle box — passed tests while
+ * all green, failed tests once any fail. Deterministic (file, name) order,
+ * same discipline as the `check` failure ordering.
+ */
+export function buildVisibleList(s: TuiState): RawTest[] {
+  const want = listStatus(s); // "passed" | "failed"
+  return s.tests
+    .filter((t) => t.status === want)
+    .sort((a, b) =>
+      a.file !== b.file
+        ? a.file < b.file
+          ? -1
+          : 1
+        : a.name < b.name
+          ? -1
+          : a.name > b.name
+            ? 1
+            : 0,
+    );
+}
+
+/** Visible list grouped by file. File order matches `buildVisibleList` (sorted),
+ *  tests within a group keep their flat-list order. The flat-list index of each
+ *  test (`indexInList`) is what `listFocus` points at, so the renderer can map
+ *  the selection back to a visual row even though headers sit between groups. */
+export interface VisibleGroup {
+  file: string;
+  tests: { test: RawTest; indexInList: number }[];
+}
+export function buildVisibleGroups(s: TuiState): VisibleGroup[] {
+  const flat = buildVisibleList(s);
+  const groups: VisibleGroup[] = [];
+  flat.forEach((test, indexInList) => {
+    const last = groups[groups.length - 1];
+    if (last && last.file === test.file) last.tests.push({ test, indexInList });
+    else groups.push({ file: test.file, tests: [{ test, indexInList }] });
+  });
+  return groups;
+}
+
+/** Pure: keep `focus` in range and the scroll window around it. */
+function windowAround(
+  focus: number,
+  offset: number,
+  len: number,
+): { focus: number; offset: number } {
+  if (len <= 0) return { focus: 0, offset: 0 };
+  const f = Math.min(Math.max(focus, 0), len - 1);
+  let o = offset;
+  if (f < o) o = f;
+  else if (f >= o + LIST_PAGE) o = f - LIST_PAGE + 1;
+  o = Math.max(0, Math.min(o, Math.max(0, len - LIST_PAGE)));
+  return { focus: f, offset: o };
+}
 
 function recompute(rootDir: string, tests: RawTest[], durationMs: number) {
   return normalize({ rootDir, tests, durationMs });
@@ -180,47 +154,36 @@ export function initState(rootDir: string): TuiState {
     rootDir,
     tests: [],
     result: recompute(rootDir, [], 0),
-    view: "overview",
-    focused: 0,
-    treeFocus: 0,
+    focusedPanel: "list",
+    listFocus: 0,
     listOffset: 0,
-    listPage: LIST_PAGE,
+    stderrOffset: 0,
     exited: false,
     exitCode: 0,
   };
 }
 
-/** Always hand the editor a clean ABSOLUTE path: it's spawned detached with
+/** Always hand the editor a clean ABSOLUTE path: it is spawned detached with
  *  no controlled cwd, so a relative path would resolve unpredictably. */
 function absFile(rootDir: string, file: string): string {
-  return isAbsolute(file) ? file : resolve(rootDir, file);
+  return isAbsolute(file) ? resolve(file) : resolve(rootDir, file);
 }
 
-/** The (file, line, col) the "open in editor" key targets for the current
- *  view: the focused failure or the focused suite. The scrollable test list
- *  opens via a mouse `openAt` instead — it has no keyboard cursor. */
+/** The (file, line, col) the "open in editor" key targets: always the test
+ *  currently focused in the visible list — regardless of which panel has
+ *  scroll focus. The list is where test identity lives. */
 function openTarget(
   s: TuiState,
 ): { file: string; line?: number; col?: number } | undefined {
-  if (s.view === "failure") {
-    const f = s.result.failures[s.focused];
-    return f
-      ? { file: absFile(s.rootDir, f.file), line: f.line, col: f.col }
-      : undefined;
-  }
-  if (s.view === "suites") {
-    const n = buildSuiteTree(s.tests)[s.treeFocus];
-    return n ? { file: absFile(s.rootDir, n.file) } : undefined;
-  }
-  return undefined;
+  const list = buildVisibleList(s);
+  const t = list[s.listFocus];
+  if (!t) return undefined;
+  return { file: absFile(s.rootDir, t.file), line: t.line, col: t.col };
 }
 
-/** Record an "open in editor" intent (monotonic seq) + an optimistic notice.
- *  Shared by the `o` key (failure/suites) and the list's mouse `openAt` (DRY). */
-function requestOpenTarget(
-  s: TuiState,
-  target: { file: string; line?: number; col?: number },
-): TuiState {
+function requestOpen(s: TuiState): TuiState {
+  const target = openTarget(s);
+  if (!target) return s;
   // Show the REAL absolute path being opened — no relative display that could
   // look like it is missing a directory (this confused a user otherwise).
   const at =
@@ -232,158 +195,137 @@ function requestOpenTarget(
   };
 }
 
-function requestOpen(s: TuiState): TuiState {
-  const target = openTarget(s);
-  return target ? requestOpenTarget(s, target) : s;
-}
-
-function clamp(i: number, len: number): number {
-  if (len <= 0) return 0;
-  return Math.min(Math.max(i, 0), len - 1);
-}
-
 export function reduce(s: TuiState, input: Input): TuiState {
   switch (input.type) {
     case "notice":
       return { ...s, notice: input.text };
-    case "resize": {
-      const len = buildGroupedList(s.tests).length;
+
+    case "focusPanel":
+      return { ...s, focusedPanel: input.panel };
+
+    case "selectListIndex": {
+      // Mouse click on a test row: move the cursor to that row, slide the
+      // scroll window to keep it visible, and take list scroll-focus so wheel
+      // events apply here without a second click. Clamped by `windowAround`.
+      const list = buildVisibleList(s);
+      const w = windowAround(input.index, s.listOffset, list.length);
       return {
         ...s,
-        listPage: input.pageSize,
-        listOffset: clampOffset(s.listOffset, len, input.pageSize),
+        focusedPanel: "list",
+        listFocus: w.focus,
+        listOffset: w.offset,
       };
     }
-    case "scroll": {
-      const len = buildGroupedList(s.tests).length;
-      return {
-        ...s,
-        listOffset: clampOffset(s.listOffset + input.delta, len, s.listPage),
-      };
-    }
-    case "openAt": {
-      const item = buildGroupedList(s.tests)[input.index];
-      if (!item) return s;
-      const target =
-        item.kind === "suite-header"
-          ? { file: absFile(s.rootDir, item.file) }
-          : {
-              file: absFile(s.rootDir, item.data.file),
-              line: item.data.line,
-              col: item.data.col,
-            };
-      return requestOpenTarget(s, target);
-    }
+
     case "test": {
       const tests = [...s.tests, input.test];
       const result = recompute(s.rootDir, tests, s.result.durationMs);
-
-      if (input.test.status === "failed") {
-        // Decision #13 = option B (last-failed-wins): jump to the failure that
-        // just appeared. It is exactly the one present now but not before.
-        const before = new Set(s.result.failures.map(failureKey));
-        const idx = result.failures.findIndex(
-          (f) => !before.has(failureKey(f)),
-        );
-        return {
-          ...s,
-          tests,
-          result,
-          view: "failure",
-          focused: idx >= 0 ? idx : clamp(s.focused, result.failures.length),
-        };
-      }
+      // When the listStatus flips (no failures → at least one, or back), the
+      // visible list contents change — reset the cursor so it doesn't dangle
+      // off-list. This is the practical edge of the user's "title flips" ask.
+      const flipped = (s.result.failed === 0) !== (result.failed === 0);
       return {
         ...s,
         tests,
         result,
-        focused: clamp(s.focused, result.failures.length),
+        listFocus: flipped ? 0 : s.listFocus,
+        listOffset: flipped ? 0 : s.listOffset,
       };
     }
 
     case "done": {
       const result = normalize(input.run);
-      const hasFailures = result.failures.length > 0;
       return {
         ...s,
         phase: "done",
         tests: input.run.tests,
         result,
-        view: s.view === "failure" && !hasFailures ? "overview" : s.view,
-        focused: clamp(s.focused, result.failures.length),
         exitCode: result.failed === 0 ? 0 : 1,
       };
     }
 
     case "rerun": {
       // Watch (M3) starts a fresh cycle: per-cycle counters reset and the UI
-      // returns to the live overview. Decision #18 (last-failed-wins) re-applies
-      // naturally as this cycle's tests stream in. `watchTrigger` = the saved
-      // file (RF-04) so the renderer can surface its suite.
+      // returns to a clean state. Decision #18 (last-failed-wins) re-applies
+      // naturally as the new cycle's tests stream in. `watchTrigger` = the
+      // saved file (RF-04) so the renderer can surface it.
       return {
         ...s,
         phase: "running",
         tests: [],
         result: recompute(s.rootDir, [], 0),
-        view: "overview",
-        focused: 0,
-        treeFocus: 0,
+        focusedPanel: "list",
+        listFocus: 0,
         listOffset: 0,
-        // listPage kept — terminal size hasn't changed
+        stderrOffset: 0,
         watchTrigger: input.trigger,
       };
     }
 
     case "key": {
-      const len = s.result.failures.length;
       switch (input.key) {
         case "q":
           return { ...s, exited: true };
-        case "s":
-          // Toggle the navigable suite tree (RF-05).
-          return s.view === "suites"
-            ? { ...s, view: "overview" }
-            : { ...s, view: "suites", treeFocus: 0 };
-        case "up":
-          // Suites tree only — the test list is mouse-driven (wheel + click).
-          if (s.view === "suites")
-            return { ...s, treeFocus: Math.max(0, s.treeFocus - 1) };
-          return s;
-        case "down":
-          if (s.view === "suites") {
-            const last = Math.max(0, buildSuiteTree(s.tests).length - 1);
-            return { ...s, treeFocus: Math.min(last, s.treeFocus + 1) };
+
+        case "tab":
+          return {
+            ...s,
+            focusedPanel: s.focusedPanel === "list" ? "stderr" : "list",
+          };
+
+        case "up": {
+          if (s.focusedPanel === "list") {
+            const list = buildVisibleList(s);
+            const w = windowAround(s.listFocus - 1, s.listOffset, list.length);
+            return { ...s, listFocus: w.focus, listOffset: w.offset };
           }
-          return s;
-        case "open":
-          // Open the focused failure/suite in the editor.
-          return requestOpen(s);
-        case "enter": {
-          if (s.view !== "suites") return s;
-          const node = buildSuiteTree(s.tests)[s.treeFocus];
-          if (!node) return s;
-          const rel = toPosixRelative(s.rootDir, node.file);
-          const idx = s.result.failures.findIndex(
-            (f) => f.file === rel && f.suite === node.suite,
-          );
-          if (idx < 0) {
-            // Green suite: return to the list scrolled to its section header.
-            const grouped = buildGroupedList(s.tests);
-            const headerIdx = grouped.findIndex(
-              (item) =>
-                item.kind === "suite-header" &&
-                item.file === node.file &&
-                item.suite === node.suite,
-            );
-            if (headerIdx < 0) return s;
-            return {
-              ...s,
-              view: "overview",
-              listOffset: clampOffset(headerIdx, grouped.length, s.listPage),
-            };
-          }
-          return { ...s, view: "failure", focused: idx };
+          return { ...s, stderrOffset: Math.max(0, s.stderrOffset - 1) };
         }
+
+        case "down": {
+          if (s.focusedPanel === "list") {
+            const list = buildVisibleList(s);
+            const w = windowAround(s.listFocus + 1, s.listOffset, list.length);
+            return { ...s, listFocus: w.focus, listOffset: w.offset };
+          }
+          // Renderer clamps to actual content height; the store just monotonically
+          // bumps so the user can scroll past whatever is currently rendered.
+          return { ...s, stderrOffset: s.stderrOffset + 1 };
+        }
+
+        case "pgup": {
+          if (s.focusedPanel === "list") {
+            const list = buildVisibleList(s);
+            const w = windowAround(
+              s.listFocus - LIST_PAGE,
+              s.listOffset,
+              list.length,
+            );
+            return { ...s, listFocus: w.focus, listOffset: w.offset };
+          }
+          return {
+            ...s,
+            stderrOffset: Math.max(0, s.stderrOffset - LIST_PAGE),
+          };
+        }
+
+        case "pgdn": {
+          if (s.focusedPanel === "list") {
+            const list = buildVisibleList(s);
+            const w = windowAround(
+              s.listFocus + LIST_PAGE,
+              s.listOffset,
+              list.length,
+            );
+            return { ...s, listFocus: w.focus, listOffset: w.offset };
+          }
+          return { ...s, stderrOffset: s.stderrOffset + LIST_PAGE };
+        }
+
+        case "enter":
+        case "open":
+          return requestOpen(s);
+
         case "a":
           return {
             ...s,
@@ -393,18 +335,6 @@ export function reduce(s: TuiState, input: Input): TuiState {
           return {
             ...s,
             command: { kind: "failed", seq: (s.command?.seq ?? 0) + 1 },
-          };
-        case "esc":
-          return { ...s, view: "overview" };
-        case "n":
-          if (len === 0) return s;
-          return { ...s, view: "failure", focused: (s.focused + 1) % len };
-        case "p":
-          if (len === 0) return s;
-          return {
-            ...s,
-            view: "failure",
-            focused: (s.focused - 1 + len) % len,
           };
       }
     }

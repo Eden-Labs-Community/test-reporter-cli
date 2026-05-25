@@ -1,10 +1,11 @@
 # PRD — test-reporter-cli
 
-> Documento vivo (v1.3). 🟢 decidido · 🟡 em aberto · 🔵 proposta minha sujeita a validação.
-> **M1–M4 verdes + UX v1.1 (100 testes); pacote publicável.** Runner plugável
-> (Vitest/Jest, ambos com watch); TUI `run`/`watch` ao vivo (tema, árvore de
-> suítes, **lista de testes rolável + abrir no editor**, diff/code-frame);
-> `check` headless determinístico; `init`.
+> Documento vivo (v1.4). 🟢 decidido · 🟡 em aberto · 🔵 proposta minha sujeita a validação.
+> **M1–M4 verdes + UX v1.1 + #23 mouse-first + #24 lock-on-save (104 testes);
+> pacote publicável.** Runner plugável (Vitest/Jest, ambos com watch); TUI
+> `run`/`watch` ao vivo (tema, árvore de suítes, lista de testes mouse-first,
+> diff/code-frame, **watch trava no arquivo salvo + countdown de 5s p/
+> re-rodar tudo**); `check` headless determinístico; `init`.
 
 ## 1. Visão geral
 
@@ -255,6 +256,29 @@ sem `.env`/`$EDITOR`/`$VISUAL`.)
     sentido que env espalhado, é a fonte única já validada por zod e
     versionada. `editorCommand` agora recebe a string do config; `wireEditor`
     recebe `config.ui.editor`. Sem `.env` no projeto. Testado; sem dep nova.
+24. **Watch lock-on-save + countdown p/ rerun (2026-05-25, escolha do usuário).**
+    Ao salvar um arquivo no `watch`, a TUI **trava** a lista nos testes
+    daquele arquivo (mais fácil de escrever testes acompanhando só o
+    contexto relevante). Quando o ciclo termina **verde**, o Summary mostra
+    um **countdown de 5s** (`↻ starting in N…`) e dispara um re-run de
+    **toda** a suíte automaticamente — o usuário vê a foto completa do
+    projeto sem precisar clicar `[ all ]`. Cliques em `[ all ]` (ou `[ failed ]`)
+    **pulam** o countdown. *Regra crítica:* o lock é **suspenso** assim que
+    qualquer teste falha — a lista mostra **todas** as falhas (nunca esconde
+    regressão); o `lockedFile` permanece em estado e re-aplica quando o user
+    consertar. Save novo durante o countdown = **cancela** o countdown e
+    **re-trava** no arquivo novo. *Como:* store pura ganha `lockedFile` +
+    `countdown {startedAt, durationMs}` + inputs `countdownStart`/
+    `countdownClear`; `rerun{trigger}` setta `lockedFile=trigger`, `rerun{}`
+    limpa; `key:"a"`/`"f"` zeram countdown (mesmo path do tick auto-fire).
+    Seletor `effectiveLockedFile(s)` (puro) — `lockedFile` se `failed===0`,
+    senão `undefined`; `buildVisibleList` filtra por ele. Edge `wireCountdown`
+    (só `renderWatchTui`): subscribe inicia ao verde, interval 100ms dispara
+    `key:"a"` ao expirar (= mesmo path do clique). Indicadores: 3ª linha do
+    Summary (`🔒 locked: <rel>` ou `↻ starting in N…`) + label da lista
+    (`Passed · <rel> (N)`). *Contrato do `check` byte-inalterado* (tudo
+    TUI-only; renderers do contrato ignoram `lockedFile`/`countdown`). **104
+    verdes** (98 + 6 novos da store).
 23. **Lista mouse-first — reverte o mecanismo da #22 (2026-05-21, escolha do
     usuário).** O usuário pediu o **oposto** da #22: a lista de testes não fica
     mais atrás de um toggle (`l`) nem é navegada por teclado. Agora, ao
@@ -328,3 +352,12 @@ núcleo/contrato prevista para nenhum deles.
   (`openAt`), arquivo+suíte em **negrito branco** (palette `heading`); removidos
   `listFocus`/`l`/setas/PgUp-PgDn. Store pura (`scroll`/`openAt`/`clampOffset`)
   testada; contrato do `check` **byte-inalterado** (e2e verde).
+- **#24 — watch lock-on-save + countdown (104 testes):** ao salvar um arquivo
+  no `watch`, a TUI **trava** a lista nos testes daquele arquivo (`lockedFile`
+  vem de `rerun.trigger`); quando todos passam, conta `5…4…3…2…1` no Summary
+  e re-roda **tudo** automaticamente (auto-fire de `key:"a"` pelo
+  `wireCountdown`). Clique em `[ all ]`/`[ failed ]` pula o countdown.
+  **Lock se auto-suspende em falhas** (`effectiveLockedFile` puro): nunca
+  esconde regressão; volta sozinho ao verde. Indicadores: `🔒 locked: …` ou
+  `↻ starting in N…` no Summary, `Passed · <rel> (N)` no label da lista.
+  Contrato do `check` **byte-inalterado** (lock/countdown são TUI-only).

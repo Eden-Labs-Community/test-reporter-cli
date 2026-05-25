@@ -28,7 +28,7 @@ Esses quatro devem sempre refletir a realidade atual.
 
 `test-reporter-cli`: CLI de relatório de testes — **`run`/`watch`/`check`**
 (+ `init`) e **dois públicos distintos** (dev na TUI · Claude no `check`).
-**v2.0.1 publicada (`eden-test-reporter-cli`); 98 verdes.**
+**v2.0.1 publicada (`eden-test-reporter-cli`); 108 verdes.**
 
 - **`test-reporter run`** — TUI (blessed) bonita e ao vivo, para devs; comando
   default. Non-TTY/CI/`--summary`/`--json` → cai no contrato do `check`. UX
@@ -36,7 +36,11 @@ Esses quatro devem sempre refletir a realidade atual.
 - **`test-reporter watch`** — mesma TUI, re-rodando ao salvar. **Vitest:**
   watcher nativo (testes relacionados, #19). **Jest:** `fs.watch` + re-run da
   suíte reusando o `run` 1-shot (#21). UI mostra o **último salvo** (RF-04).
-  Non-TTY → contrato do `check`. **(M3+M4 ✔)**
+  **Lock-on-save + countdown (#24):** save **trava** a lista no arquivo salvo
+  (`🔒 locked: <rel>`); ao ficar verde, conta `5…4…3…2…1` (`↻ starting in N…`)
+  e re-roda **tudo** automaticamente. Clique em `[ all ]`/`[ failed ]` pula
+  o countdown. Lock **auto-suspende** em falhas (todas visíveis, nunca esconde
+  regressão). Non-TTY → contrato do `check`. **(M3+M4 ✔ · #24 ✔)**
 - **`test-reporter check`** — headless, determinístico, com **contrato de saída
   estável**. **Consumidor primário = o Claude usando como ferramenta** num loop
   agêntico (rodar → ler veredito → corrigir). **(M1 ✔)**
@@ -128,6 +132,12 @@ Detalhes completos do contrato: **PRD.md §7**.
     parseia as escape sequences do mouse-capture do blessed como teclas
     (`w`/`p`/`h`/etc), o que dispara Watch Usage e o prompt "Input a single
     project name" no meio da execução.
+    **`onWatcherRerun(files, trigger)`** — `trigger` chega como **path
+    relativo ao root** (ex.: `"src/foo.test.ts"`), enquanto `files` são
+    paths **absolutos**. Por isso o `rerun` event passa `relatedFiles: files`
+    (lock #24 precisa de absoluto p/ casar com `t.file`); usar `trigger`
+    direto como lock causaria `relative(rootDir, "src/foo.test.ts")` =
+    `../src/foo.test.ts` quando `process.cwd() !== rootDir`.
   - `jest` — `JestAdapter` (`@jest/core` `runCLI` *lazy* → `RawRun`).
     **Streaming incremental:** com sink, passa `reporters:[[REPORTER_PATH,{}]]`
     (`jest-stream-reporter.cjs`) + slot `globalThis` (mesmo processo,
@@ -151,20 +161,42 @@ Detalhes completos do contrato: **PRD.md §7**.
 - `src/renderers/json` — contrato JSON versionado (`schemaVersion`).
 - `src/tui/store` — **store pura** (reducer). Estado: `phase`/`tests`/`result`/
   `focusedPanel`/`listFocus`/`listOffset`/`stderrOffset`/`openRequest`/`notice`/
-  `exited`/`exitCode`/`watchTrigger`/`command`. Seletores puros:
+  `exited`/`exitCode`/`watchTrigger`/`command`/**`lockedFiles`/`countdown`**.
+  Seletores puros:
   - `listStatus(s)` → `"passed"` ou `"failed"` (flip automático quando aparece
     a 1ª falha; decisão derivada de `result.failed`, nunca armazenada).
+  - `effectiveLockedFiles(s)` → `lockedFiles` se `failed===0`, senão `undefined`
+    (lock **auto-suspende em falhas**; raw `lockedFiles` permanece no estado e
+    re-aplica quando voltar a verde — nunca esconde regressão). **#24.**
+  - `lockAppliesNow(s)` → `effectiveLockedFiles(s)` **se** algum teste da
+    fase atual bate no filtro; senão `undefined` (**fallthrough quando o
+    filtro esvaziaria a lista** — evita "salvei e a tela ficou vazia"
+    quando o arquivo salvo é source e não há teste com esse path). Usado
+    pelo `buildVisibleList` e pelo label da lista.
   - `buildVisibleList(s)` → testes do status atual, ordenados por
     `(arquivo alfabético, line asc, col asc, nome)` — **ordem de escrita
-    dentro do arquivo**; só na TUI.
+    dentro do arquivo**; só na TUI. **Filtra por `lockAppliesNow(s)`**
+    (lock estrito enquanto verde + matches; lista cheia quando suspenso
+    ou em fallthrough).
   - `buildVisibleGroups(s)` → mesma lista agrupada por arquivo, com
     `indexInList` pra mapear seleção ↔ grupo (DRY).
   Inputs: `key` (`q`/`tab`/`up`/`down`/`pgup`/`pgdn`/`enter`/`open`/`a`/`f`)
   · `selectListIndex` (clique → escolhe linha + leva foco pra lista) ·
   `focusPanel` (clique num painel → toma scroll-focus) · `notice` (edge →
-  store: resultado do spawn do editor) · eventos do runner (`test`/`done`/
-  `rerun`). `openTarget`→`absFile` (sempre absoluto; editor detached sem cwd).
-  `tui/createStore` — observable.
+  store: resultado do spawn do editor) · `countdownStart{at,durationMs}` /
+  `countdownClear` (edge → store; `at` vem do `Date.now()` da edge p/ manter
+  o reducer puro) · eventos do runner (`test`/`done`/`rerun`). Em `rerun`:
+  **só lockeia quando `input.trigger` está presente** (= save real); com
+  trigger prioriza `input.relatedFiles` (Vitest = `_files` do
+  `onWatcherRerun`, lista absoluta dos `.test.*` que vão re-rodar; Jest =
+  `[trigger]`) com fallback p/ `[trigger]`. **Sem trigger = `undefined`**
+  — manual `[ all ]`/`[ failed ]` / auto-fire do countdown chamam
+  `api.rerunFiles()` no Vitest, que re-emite `onWatcherRerun(files, undefined)`
+  (`relatedFiles` populado, sem trigger); se locássemos esse ciclo, o
+  countdown re-disparava → triggerAll → re-lock, infinito.
+  **Zera countdown** sempre. Em `key:"a"`/`"f"`: também zeram countdown
+  (mesmo path do auto-fire do `wireCountdown`). `openTarget`→`absFile`
+  (sempre absoluto; editor detached sem cwd). `tui/createStore` — observable.
 - `src/renderers/tui` — blessed (sem React):
   - `index.ts` — `buildScreen` cria os 3 painéis e os **chips** `[ all ]`/
     `[ failed ]`/`[ quit ]` na borda do Summary; `render()` desenha summary +
@@ -188,6 +220,13 @@ Detalhes completos do contrato: **PRD.md §7**.
   - `editor.ts` — `editorCommand` **puro**; recebe `ui.editor` do config (sem
     `.env`/env). Blank → default `code`; VS Code & forks
     cursor/windsurf/codium → `-g arq:linha:col`. Testado.
+  - **Edges no `index.ts`** (efeitos colaterais isolados, observam a store):
+    `wireEditor` (`openRequest.seq`↑ → spawna `ui.editor` detached + `notice`).
+    `wireCountdown` (**#24, só `renderWatchTui`**): subscribe inicia o
+    countdown ao entrar em "done verde com lock" (`countdownStart{at,durationMs:5000}`);
+    interval 100ms dispara `key:"a"` quando `Date.now()` passa do deadline
+    (= mesmo path do clique em `[ all ]`). O spinTimer do `buildScreen` foi
+    ampliado p/ ticar também durante o countdown (re-render do `N`).
 - `src/commands/check` — compõe; veredito→stdout, erros→stderr.
 - `src/commands/run` — TTY → `renderTui`; headless → delega `runCheck` (DRY).
 - `src/commands/watch` — TTY → `renderWatchTui`; headless → `runCheck`
@@ -207,9 +246,12 @@ Detalhes completos do contrato: **PRD.md §7**.
 - `test/*.test.ts` unit (`runner-factory` = só seleção, **nunca** `.run()`/
   `.watch()`; `theme`, `codeframe`, `jest-watch`=`ignoredWatchPath`,
   `editor`=`editorCommand` puro; `tui-store` cobre flip Passed↔Failed,
-  `buildVisibleList` (ordem por arquivo→linha→col→nome), `buildVisibleGroups`
-  (DRY com `indexInList`), `selectListIndex`/`focusPanel`/`notice`,
-  watch keys) + `e2e.test.ts`; `test/fixtures/*` (Vitest + `jest-*` paridade).
+  `buildVisibleList` (ordem por arquivo→linha→col→nome + **filtro por
+  `effectiveLockedFile`**), `buildVisibleGroups` (DRY com `indexInList`),
+  `selectListIndex`/`focusPanel`/`notice`, watch keys, **lock-on-save +
+  countdown #24** — `rerun{trigger}` setta/limpa lock, `effectiveLockedFile`
+  suspende em falhas, `countdownStart`/`countdownClear`, `rerun`/`a`/`f`
+  zeram countdown) + `e2e.test.ts`; `test/fixtures/*` (Vitest + `jest-*` paridade).
 - `test/init.test.ts`/`cli.test.ts` — e2e do `init` e de help/version/unknown.
 - **M1–M4 + TUI v2 completos.** Loops watch (Vitest, Jest+`fs.watch`),
   streaming incremental do Jest, e o handler de mouse do blessed **não são
@@ -236,10 +278,17 @@ Detalhes completos do contrato: **PRD.md §7**.
   Sempre processo filho. (Por isso `runner-factory.test.ts` só **constrói** o
   adapter, nunca chama `.run()`.)
 - Comandos: `npm run build` (**tsc + `copy-assets.mjs`** copia o `.cjs` p/
-  `dist/`) · `npm test` (vitest run, **98 verdes**) · `npm run lint`
+  `dist/`) · `npm test` (vitest run, **108 verdes**) · `npm run lint`
   (= `tsc --noEmit`). Não precisa buildar p/ testar — e2e roda via `tsx`
   (o `.cjs` resolve em `src/` via `import.meta.url`). Publicável verificado:
   `npm pack` instala e roda fora do repo (`bin`/shebang/`exports` OK).
+- **⚠ Rebuilar antes de smoke do user:** o `bin: test-reporter` aponta p/
+  `dist/cli.js`; se o user roda `test-reporter watch` (pacote linkado/
+  instalado, ou `node dist/cli.js`), ele pega o **dist**, **não o source**.
+  Fix em `src/` que passou no `npm test` mas sem `npm run build` = user
+  ainda vê o bug. Sempre rodar `npm run build` antes de pedir p/ ele
+  re-testar (regra aprendida quando o smoke do #24 viu o código antigo do
+  lock por causa de dist stale).
 - Determinismo: a duração (`<n>s`) é runtime; os testes e2e a **normalizam**
   antes de comparar bytes. O contrato é determinístico módulo duração.
 - `line/col` = local da **definição do teste** (Vitest `includeTaskLocation`,

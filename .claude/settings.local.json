@@ -2,7 +2,10 @@
   "permissions": {
     "allow": [
       "Bash(node -e \"const {render} = require\\('ink'\\); console.log\\(render.toString\\(\\).slice\\(0,200\\)\\)\")",
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "Bash(npm test *)",
+      "Bash(npx tsx *)",
+      "Bash(npx vitest *)"
     ]
   }
 }

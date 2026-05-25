@@ -8,8 +8,10 @@ import {
   LIST_PAGE,
   buildVisibleGroups,
   buildVisibleList,
+  effectiveLockedFiles,
   initState,
   listStatus,
+  lockAppliesNow,
   reduce,
   type TuiState,
 } from "../src/tui/store.js";
@@ -405,6 +407,147 @@ describe("tui store — lifecycle (done/rerun/notice)", () => {
     expect(s.notice).toContain("7");
     s = reduce(s, { type: "notice", text: "could not open" });
     expect(s.notice).toBe("could not open");
+  });
+});
+
+// Feature (2026-05-25): watch locks the visible list to the file(s) related to
+// the save and counts down 5s before re-running the whole suite. Important —
+// the "saved file" (e.g. `src/foo.ts`) is rarely the same path as a test file
+// (`src/foo.test.ts`), so the lock is fed by the runner's relatedFiles list
+// (Vitest's `_files`). For Jest, where every cycle re-runs the whole suite,
+// we fall back to `[trigger]` if the user happened to save a test file.
+// And — crucial — if the filter would hide everything (e.g. a source file
+// with no direct test of the same path) the list falls through to "show all",
+// because hiding all the green tests behind a "lock" gives a confusing empty
+// screen. The lock indicator stays on in that case so the user still sees
+// that the save was recognised.
+describe("tui store — lock-on-save + countdown", () => {
+  it("rerun populates lockedFiles from relatedFiles when present", () => {
+    let s = initState(ROOT);
+    s = reduce(s, {
+      type: "rerun",
+      trigger: `${ROOT}/src/utils.ts`,
+      relatedFiles: [`${ROOT}/src/foo.test.ts`, `${ROOT}/src/bar.test.ts`],
+    });
+    expect(s.lockedFiles).toEqual([
+      `${ROOT}/src/foo.test.ts`,
+      `${ROOT}/src/bar.test.ts`,
+    ]);
+  });
+
+  it("rerun falls back to [trigger] when relatedFiles is absent", () => {
+    let s = initState(ROOT);
+    s = reduce(s, { type: "rerun", trigger: `${ROOT}/src/foo.test.ts` });
+    expect(s.lockedFiles).toEqual([`${ROOT}/src/foo.test.ts`]);
+  });
+
+  it("rerun without trigger or relatedFiles clears the lock (manual [ all ])", () => {
+    let s = initState(ROOT);
+    s = reduce(s, { type: "rerun", trigger: `${ROOT}/src/foo.test.ts` });
+    s = reduce(s, { type: "rerun" });
+    expect(s.lockedFiles).toBeUndefined();
+  });
+
+  // Real-world regression (2026-05-25): Vitest's native watcher also fires
+  // `onWatcherRerun(files, undefined)` for our own `rerunFiles()` (= the chip
+  // [ all ] and the post-green countdown). Without this guard the reducer
+  // would treat that as a lock — countdown fires → triggerAll → another
+  // locked cycle → another countdown, forever. Tie the lock to `trigger`.
+  it("rerun with relatedFiles but no trigger does NOT lock (manual [ all ] in Vitest)", () => {
+    let s = initState(ROOT);
+    s = reduce(s, {
+      type: "rerun",
+      relatedFiles: [`${ROOT}/src/foo.test.ts`, `${ROOT}/src/bar.test.ts`],
+    });
+    expect(s.lockedFiles).toBeUndefined();
+  });
+
+  it("buildVisibleList filters by lockedFiles while everything is green", () => {
+    let s = initState(ROOT);
+    s = reduce(s, {
+      type: "rerun",
+      trigger: `${ROOT}/src/utils.ts`,
+      relatedFiles: [`${ROOT}/src/foo.test.ts`],
+    });
+    s = feed(
+      s,
+      t("src/foo.test.ts", "foo-1", "passed"),
+      t("src/foo.test.ts", "foo-2", "passed"),
+      t("src/bar.test.ts", "bar-1", "passed"),
+    );
+    expect(buildVisibleList(s).map((x) => x.name)).toEqual(["foo-1", "foo-2"]);
+    expect(effectiveLockedFiles(s)).toEqual([`${ROOT}/src/foo.test.ts`]);
+    expect(lockAppliesNow(s)).toEqual([`${ROOT}/src/foo.test.ts`]);
+  });
+
+  it("lock falls through to ALL tests when the filter would hide everything", () => {
+    // User saved `src/utils.ts` (source). No test lives at that path; the
+    // adapter (a hypothetical batch-only runner) didn't pass relatedFiles
+    // → lockedFiles = [trigger]. Filter would hide every test. Fall through.
+    let s = initState(ROOT);
+    s = reduce(s, { type: "rerun", trigger: `${ROOT}/src/utils.ts` });
+    s = feed(
+      s,
+      t("src/foo.test.ts", "foo-1", "passed"),
+      t("src/bar.test.ts", "bar-1", "passed"),
+    );
+    // Both green tests show up despite the lock — the filter would have hit zero.
+    expect(buildVisibleList(s).map((x) => x.name).sort()).toEqual([
+      "bar-1",
+      "foo-1",
+    ]);
+    // Raw lockedFiles stays (the user still sees `🔒 locked: …` in the Summary).
+    expect(s.lockedFiles).toEqual([`${ROOT}/src/utils.ts`]);
+    // But the lock isn't *applied* — so the label doesn't claim a file filter.
+    expect(lockAppliesNow(s)).toBeUndefined();
+  });
+
+  it("lock is suspended whenever any test fails — every failure is visible", () => {
+    let s = initState(ROOT);
+    s = reduce(s, {
+      type: "rerun",
+      trigger: `${ROOT}/src/utils.ts`,
+      relatedFiles: [`${ROOT}/src/foo.test.ts`],
+    });
+    s = feed(
+      s,
+      t("src/foo.test.ts", "foo-1", "passed"),
+      t("src/bar.test.ts", "bar-fail", "failed", { name: "E", message: "m" }),
+    );
+    expect(listStatus(s)).toBe("failed");
+    expect(effectiveLockedFiles(s)).toBeUndefined();
+    expect(buildVisibleList(s).map((x) => x.name)).toEqual(["bar-fail"]);
+    expect(s.lockedFiles).toEqual([`${ROOT}/src/foo.test.ts`]);
+  });
+
+  it("countdownStart sets the countdown; countdownClear clears it", () => {
+    let s = initState(ROOT);
+    s = reduce(s, { type: "countdownStart", at: 1000, durationMs: 5000 });
+    expect(s.countdown).toEqual({ startedAt: 1000, durationMs: 5000 });
+    s = reduce(s, { type: "countdownClear" });
+    expect(s.countdown).toBeUndefined();
+  });
+
+  it("rerun clears any active countdown (a new save resets the wait)", () => {
+    let s = initState(ROOT);
+    s = reduce(s, { type: "countdownStart", at: 1000, durationMs: 5000 });
+    expect(s.countdown).toBeDefined();
+    s = reduce(s, { type: "rerun", trigger: `${ROOT}/src/foo.test.ts` });
+    expect(s.countdown).toBeUndefined();
+    expect(s.lockedFiles).toEqual([`${ROOT}/src/foo.test.ts`]);
+  });
+
+  it("a/f keys clear any active countdown (mouse skip)", () => {
+    let s = initState(ROOT);
+    s = reduce(s, { type: "countdownStart", at: 1000, durationMs: 5000 });
+    s = reduce(s, { type: "key", key: "a" });
+    expect(s.countdown).toBeUndefined();
+    expect(s.command?.kind).toBe("all");
+
+    s = reduce(s, { type: "countdownStart", at: 2000, durationMs: 5000 });
+    s = reduce(s, { type: "key", key: "f" });
+    expect(s.countdown).toBeUndefined();
+    expect(s.command?.kind).toBe("failed");
   });
 });
 

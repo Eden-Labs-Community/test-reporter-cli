@@ -248,7 +248,16 @@ export class JestAdapter extends TestRunnerAdapter {
         return;
       }
       running = true;
-      onEvent({ type: "rerun", trigger });
+      // Jest re-runs the whole suite (no module graph like Vitest), so we
+      // don't know the *real* related test files up front. Pass `[trigger]`
+      // so the TUI lock (#24) catches the common "I saved a test file"
+      // case; for "I saved a source file" the trigger won't match any test
+      // path and the store's `lockAppliesNow` fallthrough shows everything.
+      onEvent({
+        type: "rerun",
+        trigger,
+        relatedFiles: trigger ? [trigger] : undefined,
+      });
       try {
         await this.run(cwd, config, onEvent);
       } catch (err) {

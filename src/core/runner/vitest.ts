@@ -168,11 +168,15 @@ class StreamReporter {
   onCollected(): void {}
   onTestRemoved(): void {}
   onWatcherStart(): void {}
-  onWatcherRerun(_files: string[], trigger?: string): void {
+  onWatcherRerun(files: string[], trigger?: string): void {
     if (!this.onEvent || !this.watch) return;
     this.emitted = new Set(); // fresh per-cycle dedupe
     this.cycleStart = Date.now();
-    this.onEvent({ type: "rerun", trigger }); // RF-04: focus the saved file
+    // `files` = the test files Vitest's module graph plans to re-run for
+    // this save. The TUI lock (#24) uses them to filter the visible list:
+    // even when `trigger` is a source file, `files` are the .test paths
+    // the lock can match against.
+    this.onEvent({ type: "rerun", trigger, relatedFiles: files });
   }
   onServerRestart(): void {}
   onUserConsoleLog(): void {}

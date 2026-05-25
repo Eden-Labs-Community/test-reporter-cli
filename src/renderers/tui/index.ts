@@ -22,6 +22,7 @@ import {
   buildVisibleGroups,
   buildVisibleList,
   listStatus,
+  lockAppliesNow,
 } from "../../tui/store.js";
 import { codeFrame } from "./codeframe.js";
 import { editorCommand } from "./editor.js";
@@ -66,6 +67,24 @@ function relTrigger(s: TuiState): string | undefined {
   return tr.startsWith(pre) ? tr.slice(pre.length) : tr;
 }
 
+/** Whole seconds remaining on the countdown (rounded UP so the user sees `5`
+ *  for the first beat instead of `4`). Returns `0` once expired — the edge
+ *  (`wireCountdown`) reacts to the same condition by firing `[ all ]`. */
+function countdownSecondsLeft(s: TuiState, now: number): number {
+  if (!s.countdown) return 0;
+  const remainingMs = s.countdown.startedAt + s.countdown.durationMs - now;
+  return Math.max(0, Math.ceil(remainingMs / 1000));
+}
+
+/** Human-readable label for the locked file set: one file → its relative
+ *  path, many files → "N files". Used by both the `🔒 locked: …` Summary line
+ *  (raw `s.lockedFiles`) and the panel label (only when the lock applies). */
+function formatLockedFiles(rootDir: string, files: string[]): string {
+  if (files.length === 1 && files[0] !== undefined)
+    return toPosixRelative(rootDir, files[0]);
+  return `${files.length} files`;
+}
+
 /* ============================================================
  * Failure block for the stderr panel — header + assertion +
  * expected/actual diff (TUI-only enrichment, runner-agnostic)
@@ -105,6 +124,48 @@ function paintFailure(rootDir: string, p: Palette, f: Failure): string[] {
     }
   }
   return lines;
+}
+
+/* ============================================================
+ * `wireCountdown`: watch-only edge that owns the post-green pause.
+ *
+ *   1. As soon as a cycle finishes green WHILE a file is locked,
+ *      dispatch `countdownStart` (5s default). The predicate goes
+ *      false the moment the countdown is set, so this fires once
+ *      per cycle.
+ *   2. Poll every 100ms; when the deadline passes, dispatch
+ *      `key:"a"` — the same path as clicking [ all ], so the
+ *      reducer clears the countdown and the command-seq edge
+ *      below triggers a full re-run via the WatchHandle.
+ *
+ * Any save in the meantime arrives as `rerun{trigger}`, which the
+ * reducer treats as "cancel + re-lock", so we don't need to know
+ * about it here. Plugged only into `renderWatchTui`.
+ * ============================================================ */
+function wireCountdown(store: Store, durationMs: number): () => void {
+  const unsub = store.subscribe(() => {
+    const s = store.getState();
+    if (
+      s.phase === "done" &&
+      s.result.failed === 0 &&
+      s.lockedFiles &&
+      s.lockedFiles.length > 0 &&
+      !s.countdown
+    ) {
+      store.dispatch({ type: "countdownStart", at: Date.now(), durationMs });
+    }
+  });
+  const tickTimer = setInterval(() => {
+    const s = store.getState();
+    if (!s.countdown) return;
+    if (Date.now() >= s.countdown.startedAt + s.countdown.durationMs) {
+      store.dispatch({ type: "key", key: "a" });
+    }
+  }, 100);
+  return () => {
+    unsub();
+    clearInterval(tickTimer);
+  };
 }
 
 /* ============================================================
@@ -341,12 +402,35 @@ function buildScreen(
       counters,
     ];
     if (watch) {
-      const trig = relTrigger(s);
-      sumLines.push(
-        trig
-          ? paint(palette, `↻ saved: ${trig}`, { color: "accent" })
-          : paint(palette, "↻ watching… (click chips above to act)", { dim: true }),
-      );
+      // Priority: countdown (most ephemeral, deserves the row) → lock indicator
+      // → idle. The lock line uses 🔒 so it reads at a glance and survives a
+      // failure cycle (it stays visible even when the list shows all failures,
+      // signalling "I'll re-lock once you fix it"). The countdown line spells
+      // out the skip affordance because there is no key binding for it.
+      const lockLabel =
+        s.lockedFiles && s.lockedFiles.length > 0
+          ? formatLockedFiles(s.rootDir, s.lockedFiles)
+          : undefined;
+      if (s.countdown) {
+        const secs = countdownSecondsLeft(s, Date.now());
+        sumLines.push(
+          paint(palette, `↻ starting in ${secs}… (click [ all ] to skip)`, {
+            color: "accent",
+            bold: true,
+          }),
+        );
+      } else if (lockLabel) {
+        sumLines.push(
+          paint(palette, `🔒 locked: ${lockLabel}`, { color: "accent" }),
+        );
+      } else {
+        const trig = relTrigger(s);
+        sumLines.push(
+          trig
+            ? paint(palette, `↻ saved: ${trig}`, { color: "accent" })
+            : paint(palette, "↻ watching… (click chips above to act)", { dim: true }),
+        );
+      }
     } else {
       sumLines.push(""); // keep the box height stable
     }
@@ -394,7 +478,16 @@ function buildScreen(
     const groups = buildVisibleGroups(s);
     const labelName = status === "failed" ? "Failed" : "Passed";
     const labelColor = status === "failed" ? fail : pass;
-    listBox.setLabel(` ${labelName} (${visible.length}) `);
+    // Lock indicator on the panel label so the filter is obvious even if you
+    // missed the 🔒 line in the Summary. `lockAppliesNow` (not the raw
+    // `lockedFiles`) is what `buildVisibleList` actually filters by — keeping
+    // the label and the data in lockstep so we never claim a lock that has
+    // been suspended by a failure or that fell through because nothing matched.
+    const lockSuffix = (() => {
+      const lock = lockAppliesNow(s);
+      return lock ? ` · ${formatLockedFiles(s.rootDir, lock)}` : "";
+    })();
+    listBox.setLabel(` ${labelName}${lockSuffix} (${visible.length}) `);
     setLabelFg(listBox, labelColor);
     setBorderFg(listBox, s.focusedPanel === "list" ? labelColor : skip);
 
@@ -452,9 +545,13 @@ function buildScreen(
     screen.render();
   }
 
-  // Animate the spinner while running — no work when done.
+  // Tick while there is *something* to animate: the spinner glyph while a
+  // cycle is running, or the countdown N while we wait to auto-rerun. The
+  // countdown's seconds-remaining is derived from Date.now() — without this
+  // tick the number would freeze at `5` until the next state change.
   const spinTimer = setInterval(() => {
-    if (store.getState().phase === "running") {
+    const s = store.getState();
+    if (s.phase === "running" || s.countdown) {
       tick++;
       render();
     }
@@ -655,6 +752,7 @@ export async function renderWatchTui(
   });
   const ui = buildScreen(store, palette, /*watch*/ true);
   const unwireEditor = wireEditor(store, config.ui.editor);
+  const unwireCountdown = wireCountdown(store, 5000);
   const unsubRender = store.subscribe(() => ui.render());
   ui.render();
 
@@ -683,6 +781,7 @@ export async function renderWatchTui(
       unsubRender();
       unsubCmd();
       unwireEditor();
+      unwireCountdown();
       void (async () => {
         if (handle) await handle.close();
         ui.destroy();

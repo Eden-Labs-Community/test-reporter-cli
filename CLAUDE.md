@@ -28,7 +28,7 @@ Esses quatro devem sempre refletir a realidade atual.
 
 `test-reporter-cli`: CLI de relatório de testes — **`run`/`watch`/`check`**
 (+ `init`) e **dois públicos distintos** (dev na TUI · Claude no `check`).
-**v2.0.1 publicada (`eden-test-reporter-cli`); 104 verdes.**
+**v2.0.1 publicada (`eden-test-reporter-cli`); 107 verdes.**
 
 - **`test-reporter run`** — TUI (blessed) bonita e ao vivo, para devs; comando
   default. Non-TTY/CI/`--summary`/`--json` → cai no contrato do `check`. UX
@@ -155,17 +155,23 @@ Detalhes completos do contrato: **PRD.md §7**.
 - `src/renderers/json` — contrato JSON versionado (`schemaVersion`).
 - `src/tui/store` — **store pura** (reducer). Estado: `phase`/`tests`/`result`/
   `focusedPanel`/`listFocus`/`listOffset`/`stderrOffset`/`openRequest`/`notice`/
-  `exited`/`exitCode`/`watchTrigger`/`command`/**`lockedFile`/`countdown`**.
+  `exited`/`exitCode`/`watchTrigger`/`command`/**`lockedFiles`/`countdown`**.
   Seletores puros:
   - `listStatus(s)` → `"passed"` ou `"failed"` (flip automático quando aparece
     a 1ª falha; decisão derivada de `result.failed`, nunca armazenada).
-  - `effectiveLockedFile(s)` → `lockedFile` se `failed===0`, senão `undefined`
-    (lock se **auto-suspende** em falhas; `lockedFile` permanece no estado e
+  - `effectiveLockedFiles(s)` → `lockedFiles` se `failed===0`, senão `undefined`
+    (lock **auto-suspende em falhas**; raw `lockedFiles` permanece no estado e
     re-aplica quando voltar a verde — nunca esconde regressão). **#24.**
+  - `lockAppliesNow(s)` → `effectiveLockedFiles(s)` **se** algum teste da
+    fase atual bate no filtro; senão `undefined` (**fallthrough quando o
+    filtro esvaziaria a lista** — evita "salvei e a tela ficou vazia"
+    quando o arquivo salvo é source e não há teste com esse path). Usado
+    pelo `buildVisibleList` e pelo label da lista.
   - `buildVisibleList(s)` → testes do status atual, ordenados por
     `(arquivo alfabético, line asc, col asc, nome)` — **ordem de escrita
-    dentro do arquivo**; só na TUI. **Filtra por `effectiveLockedFile(s)`**
-    (lock estrito enquanto verde; lista cheia quando suspenso).
+    dentro do arquivo**; só na TUI. **Filtra por `lockAppliesNow(s)`**
+    (lock estrito enquanto verde + matches; lista cheia quando suspenso
+    ou em fallthrough).
   - `buildVisibleGroups(s)` → mesma lista agrupada por arquivo, com
     `indexInList` pra mapear seleção ↔ grupo (DRY).
   Inputs: `key` (`q`/`tab`/`up`/`down`/`pgup`/`pgdn`/`enter`/`open`/`a`/`f`)
@@ -174,10 +180,12 @@ Detalhes completos do contrato: **PRD.md §7**.
   store: resultado do spawn do editor) · `countdownStart{at,durationMs}` /
   `countdownClear` (edge → store; `at` vem do `Date.now()` da edge p/ manter
   o reducer puro) · eventos do runner (`test`/`done`/`rerun`). Em `rerun`:
-  setta `lockedFile=trigger` (undefined limpa) e **zera countdown**. Em
-  `key:"a"`/`"f"`: também zeram countdown (mesmo path do auto-fire do
-  `wireCountdown`). `openTarget`→`absFile` (sempre absoluto; editor detached
-  sem cwd). `tui/createStore` — observable.
+  popula `lockedFiles` priorizando `input.relatedFiles` (Vitest = `_files`
+  do `onWatcherRerun`, lista absoluta dos `.test.*` que vão re-rodar; Jest =
+  `[trigger]`) com fallback p/ `[trigger]` quando ausente; sem nada → limpa.
+  **Zera countdown** sempre. Em `key:"a"`/`"f"`: também zeram countdown
+  (mesmo path do auto-fire do `wireCountdown`). `openTarget`→`absFile`
+  (sempre absoluto; editor detached sem cwd). `tui/createStore` — observable.
 - `src/renderers/tui` — blessed (sem React):
   - `index.ts` — `buildScreen` cria os 3 painéis e os **chips** `[ all ]`/
     `[ failed ]`/`[ quit ]` na borda do Summary; `render()` desenha summary +
@@ -259,7 +267,7 @@ Detalhes completos do contrato: **PRD.md §7**.
   Sempre processo filho. (Por isso `runner-factory.test.ts` só **constrói** o
   adapter, nunca chama `.run()`.)
 - Comandos: `npm run build` (**tsc + `copy-assets.mjs`** copia o `.cjs` p/
-  `dist/`) · `npm test` (vitest run, **104 verdes**) · `npm run lint`
+  `dist/`) · `npm test` (vitest run, **107 verdes**) · `npm run lint`
   (= `tsc --noEmit`). Não precisa buildar p/ testar — e2e roda via `tsx`
   (o `.cjs` resolve em `src/` via `import.meta.url`). Publicável verificado:
   `npm pack` instala e roda fora do repo (`bin`/shebang/`exports` OK).

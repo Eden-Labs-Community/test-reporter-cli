@@ -48,15 +48,23 @@ export interface TuiState {
   /** Watch (M3): the saved source file that triggered the current cycle (RF-04). */
   watchTrigger?: string;
   /**
-   * Watch (M5): the file the user just saved, "locked" so the visible list
-   * filters to that file alone — easier to scan while you write tests. Set by
-   * `rerun{trigger}`, cleared by `rerun` without trigger (e.g. a manual `a`).
+   * Watch (M5/#24): absolute paths of the **test files** the visible list is
+   * locked to — typically the files that were re-executed in this cycle (the
+   * `relatedFiles` from the runner's watcher). Filtering to these gives the
+   * user a clean view of the tests they are actively working on.
    *
-   * The lock is *suspended* (effectively undefined) whenever any test fails
-   * (`listStatus(s) === "failed"`) so we never hide a regression. See
-   * {@link effectiveLockedFile} — that is the selector renderers must use.
+   * Why a list (not a single file)? The saved file is rarely the same as the
+   * test file: editing `src/foo.ts` causes Vitest to re-run every test that
+   * imports it (often several `.test.ts`s). We lock to that set, not to the
+   * source path — otherwise the filter would never match.
+   *
+   * The lock is *suspended* (effectively `undefined`) when any test fails
+   * (see {@link effectiveLockedFiles}) or when applying it would empty the
+   * list (see {@link lockAppliesNow}). The raw value stays in state so the
+   * `🔒 locked: …` indicator survives a failing cycle and re-applies on the
+   * next green one.
    */
-  lockedFile?: string;
+  lockedFiles?: string[];
   /**
    * Watch (M5): after a locked cycle goes green, the edge counts down 5s
    * before triggering a full re-run of every test. Stored as start time +
@@ -112,21 +120,43 @@ export function listStatus(s: TuiState): "passed" | "failed" {
 }
 
 /**
- * The locked file that actually filters the visible list right now. Equal to
- * `s.lockedFile` while everything is green; `undefined` the moment any test
- * fails so the user never has a regression hidden by the lock. The raw
- * `s.lockedFile` is preserved across this transition — when the user fixes
- * the failure, the lock re-applies naturally without a second save.
+ * The set of locked files that the list filter SHOULD apply right now — i.e.
+ * the raw `s.lockedFiles`, with one safety: if any test failed we suspend
+ * the lock entirely so the user can see every regression. The raw value is
+ * preserved on `s.lockedFiles`; this selector decides whether the filter
+ * may consider it. See {@link lockAppliesNow} for the second safety
+ * (collapse-to-empty fallthrough).
  */
-export function effectiveLockedFile(s: TuiState): string | undefined {
-  if (!s.lockedFile) return undefined;
-  return s.result.failed > 0 ? undefined : s.lockedFile;
+export function effectiveLockedFiles(s: TuiState): string[] | undefined {
+  if (!s.lockedFiles || s.lockedFiles.length === 0) return undefined;
+  return s.result.failed > 0 ? undefined : s.lockedFiles;
+}
+
+/**
+ * The lock files that are *actually* filtering the visible list — same as
+ * {@link effectiveLockedFiles} except this also returns `undefined` when
+ * applying the filter would yield zero matches. That fallthrough exists
+ * because hiding all the green tests behind a lock just produces a
+ * mysteriously empty screen ("I saved a file and now there is nothing!").
+ *
+ * Renderers use this selector for the panel label (`Passed · <rel>`); the
+ * Summary's 🔒 indicator uses the raw `s.lockedFiles` instead, so the user
+ * still sees that the save was registered even when the filter didn't bite.
+ */
+export function lockAppliesNow(s: TuiState): string[] | undefined {
+  const locked = effectiveLockedFiles(s);
+  if (!locked) return undefined;
+  const want = listStatus(s);
+  const anyMatch = s.tests.some(
+    (t) => t.status === want && locked.includes(t.file),
+  );
+  return anyMatch ? locked : undefined;
 }
 
 /**
  * Pure selector: tests shown in the middle box — passed while all green,
- * failed once any fail. When a lock is in effect (see {@link effectiveLockedFile}),
- * passed tests are further narrowed to the locked file. Ordering:
+ * failed once any fail. When a lock applies (see {@link lockAppliesNow}),
+ * the list is narrowed to tests in the locked files. Ordering:
  *
  *   1. by file (alphabetical, so the groups are predictable);
  *   2. within a file, by **source order** (`line` then `col`), so a test
@@ -139,10 +169,10 @@ export function effectiveLockedFile(s: TuiState): string | undefined {
  */
 export function buildVisibleList(s: TuiState): RawTest[] {
   const want = listStatus(s); // "passed" | "failed"
-  const lock = effectiveLockedFile(s); // undefined when any test failed
+  const lock = lockAppliesNow(s); // undefined when the filter would empty the list
   return s.tests
     .filter((t) => t.status === want)
-    .filter((t) => (lock ? t.file === lock : true))
+    .filter((t) => (lock ? lock.includes(t.file) : true))
     .sort((a, b) => {
       if (a.file !== b.file) return a.file < b.file ? -1 : 1;
       const al = a.line ?? Number.POSITIVE_INFINITY;
@@ -296,12 +326,23 @@ export function reduce(s: TuiState, input: Input): TuiState {
       // naturally as the new cycle's tests stream in. `watchTrigger` = the
       // saved file (RF-04) so the renderer can surface it.
       //
-      // M5 lock-on-save: a `trigger` means the user just saved that file →
-      // narrow the list to it (`lockedFile`). No `trigger` means the cycle
-      // came from `[ all ]`/`[ failed ]` (or the initial pass) → release the
-      // lock. Either way the countdown — if one was rolling — is cancelled,
-      // because the next cycle's verdict has to decide whether to start a new
-      // one (a save during the countdown is the "cancel and re-lock" path).
+      // M5/#24 lock-on-save: prefer the runner's `relatedFiles` (Vitest's
+      // module-graph `_files`) — those are the actual test paths that will
+      // be re-executed and the lock will match. Fall back to `[trigger]` so
+      // a user who saved a test file directly still gets a meaningful lock
+      // (and {@link lockAppliesNow}'s fallthrough handles the source-file
+      // case where nothing matches). No trigger AND no relatedFiles means
+      // the cycle came from `[ all ]`/`[ failed ]` or the initial pass →
+      // release the lock. Either way the countdown — if one was rolling —
+      // is cancelled, because the next cycle's verdict has to decide
+      // whether to start a new one.
+      const related = input.relatedFiles;
+      const lockedFiles =
+        related && related.length > 0
+          ? related
+          : input.trigger
+            ? [input.trigger]
+            : undefined;
       return {
         ...s,
         phase: "running",
@@ -312,7 +353,7 @@ export function reduce(s: TuiState, input: Input): TuiState {
         listOffset: 0,
         stderrOffset: 0,
         watchTrigger: input.trigger,
-        lockedFile: input.trigger,
+        lockedFiles,
         countdown: undefined,
       };
     }

@@ -8,9 +8,10 @@ import {
   LIST_PAGE,
   buildVisibleGroups,
   buildVisibleList,
-  effectiveLockedFile,
+  effectiveLockedFiles,
   initState,
   listStatus,
+  lockAppliesNow,
   reduce,
   type TuiState,
 } from "../src/tui/store.js";
@@ -409,45 +410,100 @@ describe("tui store — lifecycle (done/rerun/notice)", () => {
   });
 });
 
-// Feature (2026-05-25): watch locks the visible list to the saved file while
-// everything is green, and counts down 5s before re-running the whole suite.
-// The save → focus → wait → rerun loop happens entirely in the store; the edge
-// only handles the timer (Date.now lives outside the reducer).
+// Feature (2026-05-25): watch locks the visible list to the file(s) related to
+// the save and counts down 5s before re-running the whole suite. Important —
+// the "saved file" (e.g. `src/foo.ts`) is rarely the same path as a test file
+// (`src/foo.test.ts`), so the lock is fed by the runner's relatedFiles list
+// (Vitest's `_files`). For Jest, where every cycle re-runs the whole suite,
+// we fall back to `[trigger]` if the user happened to save a test file.
+// And — crucial — if the filter would hide everything (e.g. a source file
+// with no direct test of the same path) the list falls through to "show all",
+// because hiding all the green tests behind a "lock" gives a confusing empty
+// screen. The lock indicator stays on in that case so the user still sees
+// that the save was recognised.
 describe("tui store — lock-on-save + countdown", () => {
-  it("rerun{trigger} sets lockedFile; rerun without trigger clears it", () => {
+  it("rerun populates lockedFiles from relatedFiles when present", () => {
     let s = initState(ROOT);
-    s = reduce(s, { type: "rerun", trigger: `${ROOT}/src/foo.ts` });
-    expect(s.lockedFile).toBe(`${ROOT}/src/foo.ts`);
-    s = reduce(s, { type: "rerun", trigger: undefined });
-    expect(s.lockedFile).toBeUndefined();
+    s = reduce(s, {
+      type: "rerun",
+      trigger: `${ROOT}/src/utils.ts`,
+      relatedFiles: [`${ROOT}/src/foo.test.ts`, `${ROOT}/src/bar.test.ts`],
+    });
+    expect(s.lockedFiles).toEqual([
+      `${ROOT}/src/foo.test.ts`,
+      `${ROOT}/src/bar.test.ts`,
+    ]);
   });
 
-  it("buildVisibleList filters by lockedFile while everything is green", () => {
+  it("rerun falls back to [trigger] when relatedFiles is absent", () => {
     let s = initState(ROOT);
-    s = reduce(s, { type: "rerun", trigger: `${ROOT}/src/foo.ts` });
+    s = reduce(s, { type: "rerun", trigger: `${ROOT}/src/foo.test.ts` });
+    expect(s.lockedFiles).toEqual([`${ROOT}/src/foo.test.ts`]);
+  });
+
+  it("rerun without trigger or relatedFiles clears the lock (manual [ all ])", () => {
+    let s = initState(ROOT);
+    s = reduce(s, { type: "rerun", trigger: `${ROOT}/src/foo.test.ts` });
+    s = reduce(s, { type: "rerun" });
+    expect(s.lockedFiles).toBeUndefined();
+  });
+
+  it("buildVisibleList filters by lockedFiles while everything is green", () => {
+    let s = initState(ROOT);
+    s = reduce(s, {
+      type: "rerun",
+      trigger: `${ROOT}/src/utils.ts`,
+      relatedFiles: [`${ROOT}/src/foo.test.ts`],
+    });
     s = feed(
       s,
-      t("src/foo.ts", "foo-1", "passed"),
-      t("src/foo.ts", "foo-2", "passed"),
-      t("src/bar.ts", "bar-1", "passed"),
+      t("src/foo.test.ts", "foo-1", "passed"),
+      t("src/foo.test.ts", "foo-2", "passed"),
+      t("src/bar.test.ts", "bar-1", "passed"),
     );
     expect(buildVisibleList(s).map((x) => x.name)).toEqual(["foo-1", "foo-2"]);
-    expect(effectiveLockedFile(s)).toBe(`${ROOT}/src/foo.ts`);
+    expect(effectiveLockedFiles(s)).toEqual([`${ROOT}/src/foo.test.ts`]);
+    expect(lockAppliesNow(s)).toEqual([`${ROOT}/src/foo.test.ts`]);
+  });
+
+  it("lock falls through to ALL tests when the filter would hide everything", () => {
+    // User saved `src/utils.ts` (source). No test lives at that path; the
+    // adapter (a hypothetical batch-only runner) didn't pass relatedFiles
+    // → lockedFiles = [trigger]. Filter would hide every test. Fall through.
+    let s = initState(ROOT);
+    s = reduce(s, { type: "rerun", trigger: `${ROOT}/src/utils.ts` });
+    s = feed(
+      s,
+      t("src/foo.test.ts", "foo-1", "passed"),
+      t("src/bar.test.ts", "bar-1", "passed"),
+    );
+    // Both green tests show up despite the lock — the filter would have hit zero.
+    expect(buildVisibleList(s).map((x) => x.name).sort()).toEqual([
+      "bar-1",
+      "foo-1",
+    ]);
+    // Raw lockedFiles stays (the user still sees `🔒 locked: …` in the Summary).
+    expect(s.lockedFiles).toEqual([`${ROOT}/src/utils.ts`]);
+    // But the lock isn't *applied* — so the label doesn't claim a file filter.
+    expect(lockAppliesNow(s)).toBeUndefined();
   });
 
   it("lock is suspended whenever any test fails — every failure is visible", () => {
     let s = initState(ROOT);
-    s = reduce(s, { type: "rerun", trigger: `${ROOT}/src/foo.ts` });
+    s = reduce(s, {
+      type: "rerun",
+      trigger: `${ROOT}/src/utils.ts`,
+      relatedFiles: [`${ROOT}/src/foo.test.ts`],
+    });
     s = feed(
       s,
-      t("src/foo.ts", "foo-1", "passed"),
-      t("src/bar.ts", "bar-fail", "failed", { name: "E", message: "m" }),
+      t("src/foo.test.ts", "foo-1", "passed"),
+      t("src/bar.test.ts", "bar-fail", "failed", { name: "E", message: "m" }),
     );
     expect(listStatus(s)).toBe("failed");
-    expect(effectiveLockedFile(s)).toBeUndefined();
+    expect(effectiveLockedFiles(s)).toBeUndefined();
     expect(buildVisibleList(s).map((x) => x.name)).toEqual(["bar-fail"]);
-    // Lock stays in state (just suspended) so it re-applies once the user fixes.
-    expect(s.lockedFile).toBe(`${ROOT}/src/foo.ts`);
+    expect(s.lockedFiles).toEqual([`${ROOT}/src/foo.test.ts`]);
   });
 
   it("countdownStart sets the countdown; countdownClear clears it", () => {
@@ -462,9 +518,9 @@ describe("tui store — lock-on-save + countdown", () => {
     let s = initState(ROOT);
     s = reduce(s, { type: "countdownStart", at: 1000, durationMs: 5000 });
     expect(s.countdown).toBeDefined();
-    s = reduce(s, { type: "rerun", trigger: `${ROOT}/src/foo.ts` });
+    s = reduce(s, { type: "rerun", trigger: `${ROOT}/src/foo.test.ts` });
     expect(s.countdown).toBeUndefined();
-    expect(s.lockedFile).toBe(`${ROOT}/src/foo.ts`);
+    expect(s.lockedFiles).toEqual([`${ROOT}/src/foo.test.ts`]);
   });
 
   it("a/f keys clear any active countdown (mouse skip)", () => {

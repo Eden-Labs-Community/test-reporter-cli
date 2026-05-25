@@ -21,8 +21,8 @@ import {
   type TuiState,
   buildVisibleGroups,
   buildVisibleList,
-  effectiveLockedFile,
   listStatus,
+  lockAppliesNow,
 } from "../../tui/store.js";
 import { codeFrame } from "./codeframe.js";
 import { editorCommand } from "./editor.js";
@@ -74,6 +74,15 @@ function countdownSecondsLeft(s: TuiState, now: number): number {
   if (!s.countdown) return 0;
   const remainingMs = s.countdown.startedAt + s.countdown.durationMs - now;
   return Math.max(0, Math.ceil(remainingMs / 1000));
+}
+
+/** Human-readable label for the locked file set: one file → its relative
+ *  path, many files → "N files". Used by both the `🔒 locked: …` Summary line
+ *  (raw `s.lockedFiles`) and the panel label (only when the lock applies). */
+function formatLockedFiles(rootDir: string, files: string[]): string {
+  if (files.length === 1 && files[0] !== undefined)
+    return toPosixRelative(rootDir, files[0]);
+  return `${files.length} files`;
 }
 
 /* ============================================================
@@ -139,7 +148,8 @@ function wireCountdown(store: Store, durationMs: number): () => void {
     if (
       s.phase === "done" &&
       s.result.failed === 0 &&
-      s.lockedFile &&
+      s.lockedFiles &&
+      s.lockedFiles.length > 0 &&
       !s.countdown
     ) {
       store.dispatch({ type: "countdownStart", at: Date.now(), durationMs });
@@ -397,9 +407,10 @@ function buildScreen(
       // failure cycle (it stays visible even when the list shows all failures,
       // signalling "I'll re-lock once you fix it"). The countdown line spells
       // out the skip affordance because there is no key binding for it.
-      const lockRel = s.lockedFile
-        ? toPosixRelative(s.rootDir, s.lockedFile)
-        : undefined;
+      const lockLabel =
+        s.lockedFiles && s.lockedFiles.length > 0
+          ? formatLockedFiles(s.rootDir, s.lockedFiles)
+          : undefined;
       if (s.countdown) {
         const secs = countdownSecondsLeft(s, Date.now());
         sumLines.push(
@@ -408,8 +419,10 @@ function buildScreen(
             bold: true,
           }),
         );
-      } else if (lockRel) {
-        sumLines.push(paint(palette, `🔒 locked: ${lockRel}`, { color: "accent" }));
+      } else if (lockLabel) {
+        sumLines.push(
+          paint(palette, `🔒 locked: ${lockLabel}`, { color: "accent" }),
+        );
       } else {
         const trig = relTrigger(s);
         sumLines.push(
@@ -466,13 +479,13 @@ function buildScreen(
     const labelName = status === "failed" ? "Failed" : "Passed";
     const labelColor = status === "failed" ? fail : pass;
     // Lock indicator on the panel label so the filter is obvious even if you
-    // missed the 🔒 line in the Summary. `effectiveLockedFile` (not the raw
-    // `lockedFile`) is what `buildVisibleList` actually filters by — keeping
+    // missed the 🔒 line in the Summary. `lockAppliesNow` (not the raw
+    // `lockedFiles`) is what `buildVisibleList` actually filters by — keeping
     // the label and the data in lockstep so we never claim a lock that has
-    // been suspended by a failure.
+    // been suspended by a failure or that fell through because nothing matched.
     const lockSuffix = (() => {
-      const lock = effectiveLockedFile(s);
-      return lock ? ` · ${toPosixRelative(s.rootDir, lock)}` : "";
+      const lock = lockAppliesNow(s);
+      return lock ? ` · ${formatLockedFiles(s.rootDir, lock)}` : "";
     })();
     listBox.setLabel(` ${labelName}${lockSuffix} (${visible.length}) `);
     setLabelFg(listBox, labelColor);

@@ -48,6 +48,25 @@ export interface TuiState {
   /** Watch (M3): the saved source file that triggered the current cycle (RF-04). */
   watchTrigger?: string;
   /**
+   * Watch (M5): the file the user just saved, "locked" so the visible list
+   * filters to that file alone — easier to scan while you write tests. Set by
+   * `rerun{trigger}`, cleared by `rerun` without trigger (e.g. a manual `a`).
+   *
+   * The lock is *suspended* (effectively undefined) whenever any test fails
+   * (`listStatus(s) === "failed"`) so we never hide a regression. See
+   * {@link effectiveLockedFile} — that is the selector renderers must use.
+   */
+  lockedFile?: string;
+  /**
+   * Watch (M5): after a locked cycle goes green, the edge counts down 5s
+   * before triggering a full re-run of every test. Stored as start time +
+   * duration so the reducer stays pure (the renderer reads `Date.now()` and
+   * decides when to emit `countdownClear` + a `key:"a"` to fire the rerun).
+   * Cleared by `rerun` (new cycle), by `key:"a"`/`"f"` (manual skip), or
+   * explicitly by `countdownClear`.
+   */
+  countdown?: { startedAt: number; durationMs: number };
+  /**
    * Watch (M3): a re-run requested via `a`/`f`. `seq` is monotonic so the edge
    * (renderWatchTui) acts once per press even when the same kind repeats.
    */
@@ -63,6 +82,10 @@ export type Input =
   | { type: "selectListIndex"; index: number }
   /** Mouse: click a panel to take scroll focus (so wheel scroll applies there). */
   | { type: "focusPanel"; panel: FocusedPanel }
+  /** Edge → store: start the post-green countdown (purity: `at` from Date.now). */
+  | { type: "countdownStart"; at: number; durationMs: number }
+  /** Edge → store: cancel the countdown (skip / replaced / expired). */
+  | { type: "countdownClear" }
   | {
       type: "key";
       key:
@@ -89,8 +112,21 @@ export function listStatus(s: TuiState): "passed" | "failed" {
 }
 
 /**
+ * The locked file that actually filters the visible list right now. Equal to
+ * `s.lockedFile` while everything is green; `undefined` the moment any test
+ * fails so the user never has a regression hidden by the lock. The raw
+ * `s.lockedFile` is preserved across this transition — when the user fixes
+ * the failure, the lock re-applies naturally without a second save.
+ */
+export function effectiveLockedFile(s: TuiState): string | undefined {
+  if (!s.lockedFile) return undefined;
+  return s.result.failed > 0 ? undefined : s.lockedFile;
+}
+
+/**
  * Pure selector: tests shown in the middle box — passed while all green,
- * failed once any fail. Ordering:
+ * failed once any fail. When a lock is in effect (see {@link effectiveLockedFile}),
+ * passed tests are further narrowed to the locked file. Ordering:
  *
  *   1. by file (alphabetical, so the groups are predictable);
  *   2. within a file, by **source order** (`line` then `col`), so a test
@@ -103,8 +139,10 @@ export function listStatus(s: TuiState): "passed" | "failed" {
  */
 export function buildVisibleList(s: TuiState): RawTest[] {
   const want = listStatus(s); // "passed" | "failed"
+  const lock = effectiveLockedFile(s); // undefined when any test failed
   return s.tests
     .filter((t) => t.status === want)
+    .filter((t) => (lock ? t.file === lock : true))
     .sort((a, b) => {
       if (a.file !== b.file) return a.file < b.file ? -1 : 1;
       const al = a.line ?? Number.POSITIVE_INFINITY;
@@ -257,6 +295,13 @@ export function reduce(s: TuiState, input: Input): TuiState {
       // returns to a clean state. Decision #18 (last-failed-wins) re-applies
       // naturally as the new cycle's tests stream in. `watchTrigger` = the
       // saved file (RF-04) so the renderer can surface it.
+      //
+      // M5 lock-on-save: a `trigger` means the user just saved that file →
+      // narrow the list to it (`lockedFile`). No `trigger` means the cycle
+      // came from `[ all ]`/`[ failed ]` (or the initial pass) → release the
+      // lock. Either way the countdown — if one was rolling — is cancelled,
+      // because the next cycle's verdict has to decide whether to start a new
+      // one (a save during the countdown is the "cancel and re-lock" path).
       return {
         ...s,
         phase: "running",
@@ -267,8 +312,18 @@ export function reduce(s: TuiState, input: Input): TuiState {
         listOffset: 0,
         stderrOffset: 0,
         watchTrigger: input.trigger,
+        lockedFile: input.trigger,
+        countdown: undefined,
       };
     }
+
+    case "countdownStart":
+      return {
+        ...s,
+        countdown: { startedAt: input.at, durationMs: input.durationMs },
+      };
+    case "countdownClear":
+      return { ...s, countdown: undefined };
 
     case "key": {
       switch (input.key) {
@@ -335,13 +390,19 @@ export function reduce(s: TuiState, input: Input): TuiState {
           return requestOpen(s);
 
         case "a":
+          // Clearing the countdown here is what makes [ all ] (mouse) or `a`
+          // (the timer's auto-fire when the 5s elapse) act as the single
+          // "skip + rerun" path: the renderer just dispatches `key:"a"` and
+          // never has to know whether it came from a user click or a tick.
           return {
             ...s,
+            countdown: undefined,
             command: { kind: "all", seq: (s.command?.seq ?? 0) + 1 },
           };
         case "f":
           return {
             ...s,
+            countdown: undefined,
             command: { kind: "failed", seq: (s.command?.seq ?? 0) + 1 },
           };
       }

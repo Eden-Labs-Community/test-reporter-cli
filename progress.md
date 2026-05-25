@@ -1,26 +1,28 @@
 # Progress — test-reporter-cli
 
 > Estado do projeto. **Atualizar ao fim de cada task** (ver CLAUDE.md).
-> Última atualização: **2026-05-21**.
+> Última atualização: **2026-05-25**.
 
 ## Status atual
 
-**M1–M4 verdes — v1 FINALIZADO + UX v1.1; pacote publicável.** `check`
-headless determinístico (consumidor primário = Claude) + **`run`/`watch` TUI
-Ink ao vivo** (decisão #18; tema `auto/light/dark` + `--no-color`/`NO_COLOR`;
-`s` = árvore de suítes; **lista de testes mouse-first é a tela padrão ao
-terminar — roda rola, clique abre no editor (`ui.editor`), arquivo+suíte em
-negrito branco (#23, reverte o teclado da #22)**; detalhe da falha com
-diff+code-frame — tudo TUI-only) +
+**M1–M4 verdes — v1 FINALIZADO + UX v1.1 + #23 + #24; pacote publicável.**
+`check` headless determinístico (consumidor primário = Claude) + **`run`/
+`watch` TUI blessed ao vivo** (decisão #18; tema `auto/light/dark` +
+`--no-color`/`NO_COLOR`; lista de testes mouse-first como tela padrão —
+roda rola, clique abre no editor (`ui.editor`), arquivo+suíte em negrito
+branco (#23); detalhe da falha com diff+code-frame — tudo TUI-only) +
 **`init`** (safe-by-default, #20). **Watch:** Vitest = watcher nativo (#19);
-**Jest = `fs.watch` + re-run da suíte (#21)**. **Runner plugável** (Vitest/
-Jest) com **streaming incremental no Jest** via reporter `.cjs` (bridge
-`globalThis`; `done` final = agregado autoritativo → contrato intacto).
-Non-TTY/`--summary`/`--json` → contrato do `check` (paridade testada).
-**96 testes verdes**, lint+build limpos. **PUBLICADO no npm:
-`eden-test-reporter-cli@1.0.0`** (tag `latest`, registry público; bump
-0.1.0→1.0.0 + commit/tag git `v1.0.0`). Decisões 🟡 #15/#16 resolvidas
-(fora do v1). Próximo: nada pendente — v1 lançado.
+Jest = `fs.watch` + re-run da suíte (#21); **#24 lock-on-save + countdown 5s**
+trava a lista no arquivo salvo (`🔒 locked: <rel>`), conta `5…4…3…2…1`
+(`↻ starting in N…`) ao ficar verde e re-roda tudo automaticamente; `[ all ]`
+pula; lock auto-suspende em falhas (`effectiveLockedFile` puro). **Runner
+plugável** (Vitest/Jest) com **streaming incremental no Jest** via reporter
+`.cjs` (bridge `globalThis`; `done` final = agregado autoritativo → contrato
+intacto). Non-TTY/`--summary`/`--json` → contrato do `check` (paridade
+testada). **104 testes verdes** (98 + 6 do #24), lint+build limpos.
+**PUBLICADO no npm: `eden-test-reporter-cli@1.0.0`** (tag `latest`, registry
+público). Decisões 🟡 #15/#16 resolvidas (fora do v1). Próximo: smoke
+manual da TUI em TTY real (lock + countdown).
 
 ## Milestones
 
@@ -137,12 +139,18 @@ Non-TTY/`--summary`/`--json` → contrato do `check` (paridade testada).
 possível: monorepo (#15), coverage (#16), declarações `.d.ts` p/ a API;
 bumps de versão conforme novas mudanças.
 
+**Pendente desta sessão:** **smoke manual da TUI em TTY real** (#24): salvar
+arquivo → ver `🔒 locked: <rel>` no Summary + filtro na lista → consertar
+falha e ver lock re-aplicar → ver countdown `5→1` no Summary → clicar
+`[ all ]` para pular antes de zerar (e confirmar que dispara `triggerAll`).
+Renderer blessed não é auto-testado; a store pura coberta cobre a lógica.
+
 ## Critérios de sucesso
 
 Definição de pronto do app inteiro:
 **[SUCCESS_CRITERIA.md](SUCCESS_CRITERIA.md)** — fonte única; aqui só o estado.
-Status: **Globais + M1–M4 ✓ — v1 FINALIZADO + UX v1.1 (#22) ✓.**
-`npm test` = 94 verdes; pacote instala e roda fora do repo (verificado).
+Status: **Globais + M1–M4 ✓ — v1 FINALIZADO + UX v1.1 (#22) + #23 + #24 ✓.**
+`npm test` = **104 verdes**; pacote instala e roda fora do repo (verificado).
 
 ## Pendências conhecidas / dívidas
 
@@ -315,6 +323,26 @@ Status: **Globais + M1–M4 ✓ — v1 FINALIZADO + UX v1.1 (#22) ✓.**
   https://www.npmjs.com/package/eden-test-reporter-cli (`npm i
   eden-test-reporter-cli`). progress/SUCCESS atualizados (CLAUDE/PRD sem
   mudança — release não é arquitetura nem decisão de produto).
+- **2026-05-25 (#24 — watch lock-on-save + countdown):** pedido do usuário
+  (4 itens): salvar trava lista no arquivo · ao ficar verde, countdown 5s
+  re-roda tudo · save com tudo verde também dispara o ciclo · `[ all ]` pula.
+  Perguntas alinhadas via AskUserQuestion (lock suspende em falhas; countdown
+  no Summary 3ª linha; save novo cancela+re-trava; indicador `🔒 locked: …`
+  + label `Passed · <rel>`). TDD-lite red→green: 6 testes novos em
+  `tui-store.test.ts` (rerun setta/limpa `lockedFile`, filtro `buildVisibleList`,
+  suspensão em falhas, `countdownStart`/`countdownClear`, `rerun`/`a`/`f`
+  zeram countdown). Store ganha `lockedFile`/`countdown` + inputs
+  `countdownStart`/`countdownClear` + seletor exportado `effectiveLockedFile`;
+  `buildVisibleList` filtra por ele; `rerun` setta lock + zera countdown;
+  `key:"a"/"f"` zeram countdown (mesmo path do auto-fire). Renderer: 3ª linha
+  do Summary dispatcha countdown → lock → trigger → idle; label da lista vira
+  `Passed · <rel> (N)` quando lock efetivo; spinTimer tica também durante
+  countdown (re-render do `N`). Edge `wireCountdown` (só `renderWatchTui`):
+  subscribe inicia ao verde, interval 100ms dispara `key:"a"` ao expirar
+  (mesmo path do clique). **104 verdes**, lint+build limpos. Contrato do
+  `check` **byte-inalterado** (lock/countdown são TUI-only; renderers do
+  contrato ignoram). PRD v1.4 (#24) / CLAUDE / SUCCESS / progress.md
+  atualizados. **Pendente:** smoke manual da TUI em TTY real.
 - **2026-05-21 (#23 — lista de testes mouse-first; reverte o teclado da #22):**
   usuário pediu o **oposto** da #22 — sem o modo `l`, sem navegação/seleção de
   teste por teclado; **100% mouse**. Decisões confirmadas (via perguntas):

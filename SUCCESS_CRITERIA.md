@@ -13,14 +13,15 @@
 Todos os critérios **Globais + M1 + M2 + M3 + M4** marcados · `npm test` verde ·
 pacote instala e roda fora do repo · PRD/CLAUDE/progress/este doc coerentes.
 
-> **STATUS: ✅ FINALIZADO (v1) + UX v1.1 — PUBLICADO no npm.** Globais +
-> M1–M4 marcados; `npm test` = **94 verdes** (verificado nesta sessão);
-> **`eden-test-reporter-cli@1.0.0` publicado** (npm público, tag `latest`,
-> 51 arquivos / 139.3 kB — bate com o dry-run; commit/tag git `v1.0.0`);
-> os 4 docs coerentes. Decisões 🟡 #15/#16 resolvidas (fora do v1). **UX
-> v1.1 (#22):** lista de testes rolável + abrir no editor — feito. **#23
-> (lista mouse-first):** lista vira a tela padrão ao terminar, 100% mouse
-> (roda rola · clique abre no editor) + arquivo/suíte em negrito branco — feito
+> **STATUS: ✅ FINALIZADO (v1) + UX v1.1 + #23 + #24 — PUBLICADO no npm.**
+> Globais + M1–M4 marcados; `npm test` = **104 verdes** (verificado nesta
+> sessão); **`eden-test-reporter-cli@1.0.0` publicado** (npm público, tag
+> `latest`); os 4 docs coerentes. Decisões 🟡 #15/#16 resolvidas (fora do v1).
+> **#22:** lista de testes rolável + abrir no editor — feito. **#23 (lista
+> mouse-first):** 100% mouse (roda rola · clique abre no editor) + arquivo/
+> suíte em negrito branco — feito. **#24 (watch lock-on-save + countdown):**
+> save trava a lista no arquivo · countdown de 5s ao ficar verde dispara
+> re-run de tudo · `[ all ]` pula · lock auto-suspende em falhas — feito
 > (smoke manual da TUI pendente).
 
 ---
@@ -208,3 +209,32 @@ pacote instala e roda fora do repo · PRD/CLAUDE/progress/este doc coerentes.
 - [ ] **Smoke manual (TTY real):** rolar com a roda, clicar p/ abrir no editor,
   ver hover e o negrito-branco, validar o mapa clique→linha — **pendente**
   (render Ink não é auto-testado).
+
+## UX — watch lock-on-save + countdown (decisão #24)
+
+- [x] **`rerun{trigger}` trava a lista:** `lockedFile = trigger` na store;
+  `buildVisibleList` filtra os testes mostrados ao arquivo travado quando o
+  ciclo está verde (`effectiveLockedFile` puro). *(unit `tui-store.test.ts`.)*
+- [x] **Lock auto-suspende em falhas:** `effectiveLockedFile(s)` retorna
+  `undefined` sempre que `result.failed > 0` — todas as falhas ficam
+  visíveis; `s.lockedFile` permanece em estado e re-aplica quando passar.
+  *(unit cobre os dois lados.)*
+- [x] **Countdown 5s ao ficar verde:** edge `wireCountdown` (só `renderWatchTui`)
+  dispara `countdownStart{at:Date.now(), durationMs:5000}` quando
+  `phase==="done" && failed===0 && lockedFile && !countdown`. Summary mostra
+  `↻ starting in N…` (tick visual a 80ms via spinTimer derivando de Date.now).
+- [x] **Auto-fire ao expirar = `[ all ]`:** interval 100ms no `wireCountdown`
+  dispatcha `key:"a"` quando `Date.now() >= startedAt + durationMs`; o
+  reducer zera o countdown e o command-seq edge chama `WatchHandle.triggerAll()`.
+- [x] **Mouse pula o countdown:** `key:"a"` ou `key:"f"` zeram `countdown`
+  (mesmo path do auto-fire). *(unit cobre os dois.)*
+- [x] **Save novo cancela e re-trava:** qualquer `rerun{trigger}` zera
+  `countdown` e setta `lockedFile` no novo arquivo. *(unit cobre.)*
+- [x] **Indicadores visíveis:** 3ª linha do Summary mostra `🔒 locked: <rel>`
+  ou `↻ starting in N…`; label da lista vira `Passed · <rel> (N)` quando o
+  lock está efetivo.
+- [x] **Contrato intato:** `lockedFile`/`countdown` são TUI-only; renderers
+  do contrato (`summary.ts`/`json.ts`) ignoram. `npm test` = **104 verdes**.
+- [ ] **Smoke manual (TTY real):** salvar arquivo → ver lock + 🔒 → consertar
+  falha → ver lock filtrar de novo → ver countdown 5→1 → clicar `[ all ]`
+  para pular — **pendente** (render blessed não é auto-testado).

@@ -8,6 +8,7 @@ import {
   LIST_PAGE,
   buildVisibleGroups,
   buildVisibleList,
+  effectiveLockedFile,
   initState,
   listStatus,
   reduce,
@@ -405,6 +406,78 @@ describe("tui store — lifecycle (done/rerun/notice)", () => {
     expect(s.notice).toContain("7");
     s = reduce(s, { type: "notice", text: "could not open" });
     expect(s.notice).toBe("could not open");
+  });
+});
+
+// Feature (2026-05-25): watch locks the visible list to the saved file while
+// everything is green, and counts down 5s before re-running the whole suite.
+// The save → focus → wait → rerun loop happens entirely in the store; the edge
+// only handles the timer (Date.now lives outside the reducer).
+describe("tui store — lock-on-save + countdown", () => {
+  it("rerun{trigger} sets lockedFile; rerun without trigger clears it", () => {
+    let s = initState(ROOT);
+    s = reduce(s, { type: "rerun", trigger: `${ROOT}/src/foo.ts` });
+    expect(s.lockedFile).toBe(`${ROOT}/src/foo.ts`);
+    s = reduce(s, { type: "rerun", trigger: undefined });
+    expect(s.lockedFile).toBeUndefined();
+  });
+
+  it("buildVisibleList filters by lockedFile while everything is green", () => {
+    let s = initState(ROOT);
+    s = reduce(s, { type: "rerun", trigger: `${ROOT}/src/foo.ts` });
+    s = feed(
+      s,
+      t("src/foo.ts", "foo-1", "passed"),
+      t("src/foo.ts", "foo-2", "passed"),
+      t("src/bar.ts", "bar-1", "passed"),
+    );
+    expect(buildVisibleList(s).map((x) => x.name)).toEqual(["foo-1", "foo-2"]);
+    expect(effectiveLockedFile(s)).toBe(`${ROOT}/src/foo.ts`);
+  });
+
+  it("lock is suspended whenever any test fails — every failure is visible", () => {
+    let s = initState(ROOT);
+    s = reduce(s, { type: "rerun", trigger: `${ROOT}/src/foo.ts` });
+    s = feed(
+      s,
+      t("src/foo.ts", "foo-1", "passed"),
+      t("src/bar.ts", "bar-fail", "failed", { name: "E", message: "m" }),
+    );
+    expect(listStatus(s)).toBe("failed");
+    expect(effectiveLockedFile(s)).toBeUndefined();
+    expect(buildVisibleList(s).map((x) => x.name)).toEqual(["bar-fail"]);
+    // Lock stays in state (just suspended) so it re-applies once the user fixes.
+    expect(s.lockedFile).toBe(`${ROOT}/src/foo.ts`);
+  });
+
+  it("countdownStart sets the countdown; countdownClear clears it", () => {
+    let s = initState(ROOT);
+    s = reduce(s, { type: "countdownStart", at: 1000, durationMs: 5000 });
+    expect(s.countdown).toEqual({ startedAt: 1000, durationMs: 5000 });
+    s = reduce(s, { type: "countdownClear" });
+    expect(s.countdown).toBeUndefined();
+  });
+
+  it("rerun clears any active countdown (a new save resets the wait)", () => {
+    let s = initState(ROOT);
+    s = reduce(s, { type: "countdownStart", at: 1000, durationMs: 5000 });
+    expect(s.countdown).toBeDefined();
+    s = reduce(s, { type: "rerun", trigger: `${ROOT}/src/foo.ts` });
+    expect(s.countdown).toBeUndefined();
+    expect(s.lockedFile).toBe(`${ROOT}/src/foo.ts`);
+  });
+
+  it("a/f keys clear any active countdown (mouse skip)", () => {
+    let s = initState(ROOT);
+    s = reduce(s, { type: "countdownStart", at: 1000, durationMs: 5000 });
+    s = reduce(s, { type: "key", key: "a" });
+    expect(s.countdown).toBeUndefined();
+    expect(s.command?.kind).toBe("all");
+
+    s = reduce(s, { type: "countdownStart", at: 2000, durationMs: 5000 });
+    s = reduce(s, { type: "key", key: "f" });
+    expect(s.countdown).toBeUndefined();
+    expect(s.command?.kind).toBe("failed");
   });
 });
 
